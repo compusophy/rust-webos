@@ -32,27 +32,29 @@ impl Shell {
         self.prompt = format!("user@webos:{} $ ", path);
     }
 
-    pub fn on_key(&mut self, key: &str, term: &mut crate::term::Terminal, fs: &mut crate::fs::FileSystem) {
+    pub fn on_key(&mut self, key: &str, term: &mut crate::term::Terminal, fs: &mut crate::fs::FileSystem) -> bool {
         if key == "Enter" {
             term.write_char('\n');
-            self.execute_command(term, fs);
+            let reboot = self.execute_command(term, fs);
             self.input_buffer.clear();
             self.draw_prompt(term);
+            return reboot;
         } else if key == "Backspace" {
             if !self.input_buffer.is_empty() {
                 self.input_buffer.pop();
-                term.write_char('\x08'); // Allow backspace on terminal only if buffer has chars
+                term.write_char('\x08'); 
             }
         } else if key.len() == 1 {
             self.input_buffer.push_str(key);
             term.write_str(key);
         }
+        false
     }
 
-    fn execute_command(&mut self, term: &mut crate::term::Terminal, fs: &mut crate::fs::FileSystem) {
+    fn execute_command(&mut self, term: &mut crate::term::Terminal, fs: &mut crate::fs::FileSystem) -> bool {
         let cmd_str = self.input_buffer.trim();
         if cmd_str.is_empty() {
-            return;
+            return false;
         }
 
         let parts: Vec<&str> = cmd_str.split_whitespace().collect();
@@ -61,11 +63,14 @@ impl Shell {
         match cmd {
             "help" => {
                 term.write_str("Available commands:\n");
-                term.write_str("  help   - Show this help\n");
-                term.write_str("  clear  - Clear screen\n");
-                term.write_str("  ls     - List files\n");
-                term.write_str("  mkdir  - Create directory\n");
-                term.write_str("  df     - Disk Usage\n");
+                term.write_str("  help     - Show this help\n");
+                term.write_str("  clear    - Clear screen\n");
+                term.write_str("  ls       - List files\n");
+                term.write_str("  cd <dir> - Change directory\n");
+                term.write_str("  mkdir    - Create directory\n");
+                term.write_str("  df       - Disk Usage\n");
+                term.write_str("  sysinfo  - System Information\n");
+                term.write_str("  reboot   - Reboot system\n");
             },
             "clear" => {
                 term.reset();
@@ -94,7 +99,6 @@ impl Shell {
             },
             "cd" => {
                 if parts.len() < 2 {
-                     // Assume root? or do nothing
                      match fs.cd("/") { _ => {} };
                 } else {
                      match fs.cd(parts[1]) {
@@ -106,16 +110,23 @@ impl Shell {
                         }
                     }
                 }
-                // Update prompt to show path? 
-                // Getting path string requires helper.
                 self.update_prompt(fs); 
             },
              "df" => {
                 let total_kb = fs.total_space / 1024;
                 let used_kb = fs.used_space / 1024;
-                // Basic string formatting without std::fmt might be tricky if not careful, but format! works in wasm
                 let msg = format!("Disk Usage:\n  Used: {} KB\n  Total: {} KB\n  Free: {} KB\n", used_kb, total_kb, total_kb - used_kb);
                 term.write_str(&msg);
+            },
+            "sysinfo" => {
+                term.write_str("System Information:\n");
+                term.write_str("  Kernel:  Rust WebOS v0.1.0\n");
+                term.write_str("  Arch:    wasm32-unknown-unknown\n");
+                term.write_str("  Display: 512x512 RGBA (1 MB VRAM)\n");
+                term.write_str("  Memory:  Dynamic WASM Linear Memory\n");
+            },
+            "reboot" => {
+                return true;
             },
             _ => {
                 term.write_str("Unknown command: ");
@@ -123,5 +134,6 @@ impl Shell {
                 term.write_char('\n');
             }
         }
+        false
     }
 }

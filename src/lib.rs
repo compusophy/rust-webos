@@ -13,12 +13,19 @@ static INIT: Once = Once::new();
 static mut OS_STATE: Option<OsState> = None;
 static mut INPUT_QUEUE: Option<VecDeque<String>> = None;
 
+enum MachineState {
+    Post,
+    Booting,
+    Active,
+}
+
 struct OsState {
     gfx: gfx::Context,
     term: term::Terminal,
     shell: shell::Shell,
     fs: fs::FileSystem,
     tick_count: u64,
+    state: MachineState,
 }
 
 #[wasm_bindgen]
@@ -31,21 +38,17 @@ pub fn init_os() {
             
             let gfx = gfx::Context::new(512, 512);
             let mut term = term::Terminal::new(64, 64);
-            let mut shell = shell::Shell::new();
-            let mut fs = fs::FileSystem::new(10); // 10 MB disk
+            let shell = shell::Shell::new();
+            let fs = fs::FileSystem::new(10); // 10 MB disk
             
-            // Boot sequence
-            term.write_str("Welcome to Rust WebOS v0.1\n");
-            term.write_str("Initializing kernel...\n");
-            term.write_str("Filesystem: Mounted (in-memory, 10MB)\n");
-            shell.draw_prompt(&mut term);
-
+            // Initial state is POST
             OS_STATE = Some(OsState {
                 gfx,
                 term,
                 shell,
                 fs,
                 tick_count: 0,
+                state: MachineState::Post,
             });
         }
         
@@ -60,14 +63,70 @@ pub fn tick() {
 
     os.tick_count += 1;
 
-    // Process Input
-    while let Some(key) = input_queue.pop_front() {
-        os.shell.on_key(&key, &mut os.term, &mut os.fs);
+    match os.state {
+        MachineState::Post => {
+            // Simulate BIOS POST
+            // Clear screen to Blue basic color or Black
+            os.gfx.clear(0, 0, 50); 
+            
+            // Draw BIOS Text manually or via terminal
+            // Let's use terminal but custom position or just write to it.
+            // But terminal has state (cursor).
+            // Let's use a temporary terminal reset or just draw directly using font.
+            // For simplicity, let's use the terminal but reset it often?
+            // Actually, let's just write to terminal.
+            
+            if os.tick_count == 1 {
+                os.term.reset();
+                os.term.write_str("Rust WebBIOS v1.0\n");
+                os.term.write_str("Copyright (C) 2026 CompuSophy Inc.\n\n");
+                os.term.write_str("CPU: WASM-32 Virtual Core\n");
+            }
+            
+            if os.tick_count % 10 == 0 && os.tick_count < 100 {
+                 let mem = os.tick_count * 1024;
+                 let msg = format!("\rMemory Test: {} KB OK", mem);
+                 os.term.write_str(&msg);
+            }
+            
+            if os.tick_count > 120 {
+                os.state = MachineState::Booting;
+                os.term.write_str("\n\nSystem OK.\nBooting from Hard Disk...\n");
+            }
+            
+            // Render
+            os.term.render(&mut os.gfx);
+        },
+        MachineState::Booting => {
+            if os.tick_count > 180 {
+                // Transition to Active
+                os.state = MachineState::Active;
+                os.term.reset(); // Clear BIOS screen
+                
+                // Print Kernel Boot msg
+                os.term.write_str("Welcome to Rust WebOS v0.1\n");
+                os.term.write_str("Initializing kernel...\n");
+                os.term.write_str("Filesystem: Mounted (in-memory, 10MB)\n");
+                os.shell.draw_prompt(&mut os.term);
+            }
+            os.term.render(&mut os.gfx);
+        },
+        MachineState::Active => {
+            // Process Input
+            while let Some(key) = input_queue.pop_front() {
+                 let res = os.shell.on_key(&key, &mut os.term, &mut os.fs);
+                 if res {
+                     // Reboot requested (assuming boolean convention for now, wait I need to update shell return type)
+                     // Let's hold off on reboot logic in this step or force it by checking a special var?
+                     // I will update shell to return bool: true = reboot, false = continue
+                     os.state = MachineState::Post;
+                     os.tick_count = 0;
+                 }
+            }
+            os.gfx.clear(0, 0, 0); // Black background
+            os.term.render(&mut os.gfx);
+        }
     }
-
-    // Render
-    os.gfx.clear(0, 0, 0); // Black background
-    os.term.render(&mut os.gfx);
 }
 
 #[wasm_bindgen]
