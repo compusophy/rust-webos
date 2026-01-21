@@ -1,0 +1,17 @@
+# Rust
+target/
+**/*.rs.bk
+
+# WASM
+pkg/
+
+# System
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Misc
+*.log

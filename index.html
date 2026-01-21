@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rust Web OS</title>
+    <style>
+        body {
+            background-color: #111;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            overflow: hidden;
+        }
+
+        canvas {
+            image-rendering: pixelated;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+            background: #000;
+        }
+    </style>
+</head>
+
+<body>
+    <canvas id="screen" width="512" height="512"></canvas>
+    <script type="module">
+        import init, { init_os, tick, on_keydown, on_keyup } from './pkg/webos.js';
+
+        async function run() {
+            const wasm = await init();
+
+            // Initialize the OS (memory, state)
+            init_os();
+
+            const canvas = document.getElementById('screen');
+            const ctx = canvas.getContext('2d');
+
+            // Input handling
+            document.addEventListener('keydown', (e) => {
+                on_keydown(e.key, e.ctrlKey, e.altKey, e.metaKey);
+                // Prevent default for common terminal keys
+                if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab', 'Backspace', 'Enter'].includes(e.key) || (e.ctrlKey)) {
+                    e.preventDefault();
+                }
+            });
+
+            document.addEventListener('keyup', (e) => {
+                on_keyup(e.key);
+            });
+
+            // The Render Loop
+            const WIDTH = 512;
+            const HEIGHT = 512;
+
+            function step() {
+                tick();
+
+                const memory = wasm.memory;
+                const bufferPtr = window.get_video_buffer_ptr();
+
+                const buffer = new Uint8ClampedArray(memory.buffer, bufferPtr, WIDTH * HEIGHT * 4);
+                const imageData = new ImageData(buffer, WIDTH, HEIGHT);
+
+                ctx.putImageData(imageData, 0, 0);
+
+                requestAnimationFrame(step);
+            }
+
+            // Expose the helper to be called from Rust to update the pointer if needed, 
+            // though usually the pointer is stable for the lifetime of the app.
+            // For now, let's attach the getter to window so we can call it in the loop.
+            // Actually, better to import it if exported.
+            // We will import `get_video_buffer_ptr` from the module.
+            // Wait, standard wasm-bindgen pattern:
+
+            // Let's redefine the imports to include `get_video_buffer_ptr`
+            const { get_video_buffer_ptr } = await import('./pkg/webos.js');
+            window.get_video_buffer_ptr = get_video_buffer_ptr; // Hacky but works for the loop above
+
+            requestAnimationFrame(step);
+        }
+
+        run();
+    </script>
+</body>
+
+</html>
