@@ -1,5 +1,5 @@
 [package]
-name = "webos"
+name = "wasmix"
 version = "0.1.0"
 edition = "2021"
 

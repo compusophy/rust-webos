@@ -1,147 +1,197 @@
 use wasm_bindgen::prelude::*;
 use std::sync::Once;
 use std::collections::VecDeque;
+use std::cell::RefCell;
 
 mod gfx;
-mod fs;
+mod hw;
+mod sys;
+
 mod term;
-mod shell;
+
+mod bios;
 
 static INIT: Once = Once::new();
 
-// Global Kernel State
-static mut OS_STATE: Option<OsState> = None;
-static mut INPUT_QUEUE: Option<VecDeque<String>> = None;
-
-enum MachineState {
-    Post,
-    Booting,
-    Active,
+// Global Machine State
+thread_local! {
+    static MACHINE: RefCell<Option<Machine>> = RefCell::new(None);
+    static INPUT_QUEUE: RefCell<Option<VecDeque<String>>> = RefCell::new(None);
 }
 
-struct OsState {
-    gfx: gfx::Context,
-    term: term::Terminal,
-    shell: shell::Shell,
-    fs: fs::FileSystem,
+pub enum MachineState {
+    Bios,
+    Kernel,
+}
+
+pub struct Machine {
+    pub cpu: hw::cpu::Cpu,
+    pub bus: hw::bus::Bus,
+    pub bios: bios::Bios,
+    
+    // Peripherals / Firmware
+    pub term: term::Terminal,
+    pub shell: sys::shell::Shell,
+    pub fs: sys::fs::FileSystem,
+    
+    // Timing and State
     tick_count: u64,
-    state: MachineState,
+    last_time: f64,
+    accumulator: f64,
+    real_fps: f64,
+    frames_buffer: u64,
+    pub last_sec_time: f64,
+    pub state: MachineState,
 }
+
 
 #[wasm_bindgen]
 pub fn init_os() {
     INIT.call_once(|| {
         std::panic::set_hook(Box::new(console_error_panic_hook::hook));
         
-        unsafe {
-            INPUT_QUEUE = Some(VecDeque::new());
-            
-            let gfx = gfx::Context::new(512, 512);
-            let mut term = term::Terminal::new(64, 64);
-            let shell = shell::Shell::new();
-            let fs = fs::FileSystem::new(10); // 10 MB disk
-            
-            // Initial state is POST
-            OS_STATE = Some(OsState {
-                gfx,
-                term,
-                shell,
-                fs,
-                tick_count: 0,
-                state: MachineState::Post,
-            });
-        }
+        INPUT_QUEUE.with(|q| {
+            *q.borrow_mut() = Some(VecDeque::new());
+        });
         
-        web_sys::console::log_1(&"OS Initialized".into());
+        // Hardware Init
+        let ram = hw::ram::Ram::new(16 * 1024 * 1024); // 16 MB RAM
+        let gpu = hw::gpu::Gpu::new(512, 512); // VRAM
+        let bus = hw::bus::Bus::new(ram, gpu);
+        let cpu = hw::cpu::Cpu::new();
+        let bios = bios::Bios::new();
+        
+        // Firmware/Software Init
+        // Firmware/Software Init
+        let term = term::Terminal::new(64, 32);
+        let shell = sys::shell::Shell::new();
+        let fs = sys::fs::FileSystem::new(10); // 10 MB disk
+        
+        // Initial state is POST
+        let machine = Machine {
+            cpu,
+            bus,
+            term,
+            shell,
+            fs,
+            tick_count: 0,
+            last_time: web_sys::window().unwrap().performance().unwrap().now(),
+            accumulator: 0.0,
+            real_fps: 0.0,
+            frames_buffer: 0,
+            last_sec_time: web_sys::window().unwrap().performance().unwrap().now(),
+            state: MachineState::Bios,
+            bios,
+        };
+
+        MACHINE.with(|m| {
+            *m.borrow_mut() = Some(machine);
+        });
+        
+        web_sys::console::log_1(&"Virtual Machine Initialized".into());
     });
 }
 
 #[wasm_bindgen]
 pub fn tick() {
-    let os = unsafe { OS_STATE.as_mut().expect("OS not initialized") };
-    let input_queue = unsafe { INPUT_QUEUE.as_mut().expect("Input queue not initialized") };
+    MACHINE.with(|m| {
+        let mut borrow = m.borrow_mut();
+        if let Some(machine) = borrow.as_mut() {
+            let now = web_sys::window().unwrap().performance().unwrap().now();
+            let frame_time = now - machine.last_time;
+            machine.last_time = now;
+            
+            // FPS Counter
+            if now - machine.last_sec_time >= 1000.0 {
+                machine.real_fps = machine.frames_buffer as f64;
+                machine.frames_buffer = 0;
+                machine.last_sec_time = now;
+            }
+            
+            machine.accumulator += frame_time;
 
-    os.tick_count += 1;
+            // Fixed timestep: 60 ticks per second (16.66ms per tick)
+            const TICK_RATE: f64 = 1000.0 / 60.0; 
+            const MAX_STEPS_PER_FRAME: i32 = 10;
+            
+            let mut steps = 0;
+            while machine.accumulator >= TICK_RATE && steps < MAX_STEPS_PER_FRAME {
+                cpu_step(machine);
+                machine.accumulator -= TICK_RATE;
+                steps += 1;
+            }
 
-    match os.state {
-        MachineState::Post => {
-            // Simulate BIOS POST
-            // Clear screen to Blue basic color or Black
-            os.gfx.clear(0, 0, 50); 
-            
-            // Draw BIOS Text manually or via terminal
-            // Let's use terminal but custom position or just write to it.
-            // But terminal has state (cursor).
-            // Let's use a temporary terminal reset or just draw directly using font.
-            // For simplicity, let's use the terminal but reset it often?
-            // Actually, let's just write to terminal.
-            
-            if os.tick_count == 1 {
-                os.term.reset();
-                os.term.write_str("Rust WebBIOS v1.0\n");
-                os.term.write_str("Copyright (C) 2026 CompuSophy Inc.\n\n");
-                os.term.write_str("CPU: WASM-32 Virtual Core\n");
-            }
-            
-            if os.tick_count % 10 == 0 && os.tick_count < 100 {
-                 let mem = os.tick_count * 1024;
-                 let msg = format!("\rMemory Test: {} KB OK", mem);
-                 os.term.write_str(&msg);
-            }
-            
-            if os.tick_count > 120 {
-                os.state = MachineState::Booting;
-                os.term.write_str("\n\nSystem OK.\nBooting from Hard Disk...\n");
-            }
-            
-            // Render
-            os.term.render(&mut os.gfx);
-        },
-        MachineState::Booting => {
-            if os.tick_count > 180 {
-                // Transition to Active
-                os.state = MachineState::Active;
-                os.term.reset(); // Clear BIOS screen
+            // Render always happens once per browser frame
+            // Map text mode to GPU VRAM (conceptually)
+            machine.term.render(&mut machine.bus.gpu, 4, 0);
+        }
+    });
+}
+
+fn cpu_step(machine: &mut Machine) {
+    let mut input_op = None;
+    INPUT_QUEUE.with(|q| {
+        if let Some(queue) = q.borrow_mut().as_mut() {
+            input_op = queue.pop_front();
+        }
+    });
+   
+    // CPU Cycle
+    machine.cpu.step(&mut machine.bus);
+    
+    machine.tick_count += 1;
+    machine.frames_buffer += 1; // Count cycle for FPS
+    
+    match machine.state {
+        MachineState::Bios => {
+            if machine.bios.step(&mut machine.term, &mut machine.bus) {
+                // Handoff to Kernel
+                machine.state = MachineState::Kernel;
                 
+                // Clear BIOS Screen
+                machine.term.reset();
+                machine.term.show_cursor(true); // Enable cursor for shell
+                machine.bus.gpu.clear(0, 0, 0); // Clear to Black
+
                 // Print Kernel Boot msg
-                os.term.write_str("Welcome to Rust WebOS v0.1\n");
-                os.term.write_str("Initializing kernel...\n");
-                os.term.write_str("Filesystem: Mounted (in-memory, 10MB)\n");
-                os.shell.draw_prompt(&mut os.term);
+                // User requested to remove welcome text and just show prompt
+                machine.shell.draw_prompt(&mut machine.term);
             }
-            os.term.render(&mut os.gfx);
         },
-        MachineState::Active => {
-            // Process Input
-            while let Some(key) = input_queue.pop_front() {
-                 let res = os.shell.on_key(&key, &mut os.term, &mut os.fs);
+        MachineState::Kernel => {
+            // Process Input (Interrupts)
+            if let Some(key) = input_op {
+                 let res = machine.shell.on_key(&key, &mut machine.term, &mut machine.fs, machine.tick_count, machine.real_fps);
                  if res {
-                     // Reboot requested (assuming boolean convention for now, wait I need to update shell return type)
-                     // Let's hold off on reboot logic in this step or force it by checking a special var?
-                     // I will update shell to return bool: true = reboot, false = continue
-                     os.state = MachineState::Post;
-                     os.tick_count = 0;
+                     // Soft Reboot
+                     machine.bios = bios::Bios::new();
+                     machine.state = MachineState::Bios;
+                     machine.tick_count = 0;
                  }
             }
-            os.gfx.clear(0, 0, 0); // Black background
-            os.term.render(&mut os.gfx);
-        }
+            machine.bus.gpu.clear(0, 0, 0); // Black background
+        },
     }
 }
 
 #[wasm_bindgen]
 pub fn get_video_buffer_ptr() -> *const u8 {
-    let os = unsafe { OS_STATE.as_ref().expect("OS not initialized") };
-    os.gfx.buffer.as_ptr()
+    MACHINE.with(|m| {
+        if let Some(machine) = m.borrow().as_ref() {
+            machine.bus.gpu.buffer.as_ptr()
+        } else {
+            std::ptr::null()
+        }
+    })
 }
 
 #[wasm_bindgen]
 pub fn on_keydown(key: String, _ctrl: bool, _alt: bool, _meta: bool) {
-    unsafe {
-        if let Some(queue) = INPUT_QUEUE.as_mut() {
+    INPUT_QUEUE.with(|q| {
+        if let Some(queue) = q.borrow_mut().as_mut() {
             queue.push_back(key);
         }
-    }
+    });
 }
 
 #[wasm_bindgen]

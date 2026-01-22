@@ -13,6 +13,7 @@ pub struct Terminal {
     pub buffer: Vec<Cell>,
     pub cursor_x: usize,
     pub cursor_y: usize,
+    pub cursor_visible: bool,
     pub default_fg: u32,
     pub default_bg: u32,
 }
@@ -30,6 +31,7 @@ impl Terminal {
             cursor_y: 0,
             default_fg,
             default_bg,
+            cursor_visible: false, // Default hidden for BIOS
         }
     }
 
@@ -41,6 +43,10 @@ impl Terminal {
             cell.fg = self.default_fg;
             cell.bg = self.default_bg;
         }
+    }
+
+    pub fn show_cursor(&mut self, visible: bool) {
+        self.cursor_visible = visible;
     }
 
     pub fn write_str(&mut self, s: &str) {
@@ -115,7 +121,11 @@ impl Terminal {
         }
     }
 
-    pub fn render(&self, ctx: &mut Context) {
+    pub fn set_fg_color(&mut self, color: u32) {
+        self.default_fg = color;
+    }
+
+    pub fn render(&self, ctx: &mut Context, offset_x: u32, offset_y: u32) {
         // We assume 8x16 font for now
         // TODO: Import font constants
         let char_w = 8;
@@ -124,25 +134,28 @@ impl Terminal {
         for y in 0..self.rows {
             for x in 0..self.cols {
                 let cell = &self.buffer[y * self.cols + x];
-                // Draw background
-                ctx.fill_rect((x * char_w) as u32, (y * char_h) as u32, char_w as u32, char_h as u32, cell.bg);
-                // Draw char
-                // ctx.draw_char(x * char_w, y * char_h, cell.c, cell.fg);
-                // For now, we need to implement draw_char in Context or helper
-                crate::gfx::font::draw_char(ctx, (x * char_w) as u32, (y * char_h) as u32, cell.c, cell.fg);
+                let draw_x = offset_x + (x * char_w) as u32;
+                let draw_y = offset_y + (y * char_h) as u32;
+
+                // Draw background only if opaque
+                if (cell.bg & 0xFF) != 0 {
+                    ctx.fill_rect(draw_x, draw_y, char_w as u32, char_h as u32, cell.bg);
+                }
+                
+                // Draw char centered vertically in 16px cell (offset +4)
+                crate::gfx::font::draw_char(ctx, draw_x, draw_y + 4, cell.c, cell.fg);
             }
         }
         
         // Draw cursor
-        // Simple block cursor
-        let cx = (self.cursor_x * char_w) as u32;
-        let cy = (self.cursor_y * char_h) as u32;
-        // Invert color logic or just draw a white block with low alpha (if we had blending)
-        // Let's just draw an underline or a block
-        // Draw a full block for now
-        // ctx.fill_rect(cx, cy + 14, 8, 2, self.default_fg);
-        // Or full block blinking? We need time state for blinking.
-        // Just static block for now
-        ctx.fill_rect(cx, cy + 14, 8, 2, 0x00_FF_00_FF); // Green cursor
+        if self.cursor_visible {
+            let cx = offset_x + (self.cursor_x * char_w) as u32;
+            let cy = offset_y + (self.cursor_y * char_h) as u32;
+            
+            // Vertical Bar Cursor
+            // Thicker (4px) and vertically centered on the 16px cell with slight overflow relative to font.
+            // Height 14px (y+1 to y+15), leaving 1px top/bottom in 16px cell.
+            ctx.fill_rect(cx, cy + 1, 4, 14, 0xFF_FF_FF_FF); 
+        }
     }
 }

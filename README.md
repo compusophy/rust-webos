@@ -1,30 +1,43 @@
-# Rust WebOS
+# wasmix (WASM + Unix/Mix)
 
-A minimal "Web OS" terminal environment running in the browser via Rust and WebAssembly.
+A minimal "Web OS" virtual machine environment running in the browser via Rust and WebAssembly.
 
-## Features
-- **Pixel-perfect Rendering**: Custom 512x512 pixel buffer using HTML Canvas.
-- **Terminal Emulator**: Built-in text rendering (font8x8), scrolling, and cursor support.
-- **Virtual Filesystem**: 
-  - Directory navigation (`cd`, `ls`, `mkdir`).
-  - Disk usage tracking (`df`).
-  - In-memory storage (non-persistent in this version).
-- **Shell**: Custom command interpreter handling input buffers and basic commands.
-- **Minimal Dependencies**: Uses `wasm-bindgen` and `web-sys` for glue, but core logic is pure Rust.
+## Architecture
+The system is designed as a **32-bit Virtual Machine** (`src/hw/`) running a Rust-based Kernel (`src/lib.rs`).
+- **CPU**: Simulated 32-bit processor.
+- **RAM**: 16 MB Linear Memory.
+- **GPU**: 512x512 RGBA VRAM.
+- **FS**: In-memory Virtual Filesystem.
+
+## Commands
+The following commands are implemented in the Shell firmware:
+
+| Command | Description |
+|---------|-------------|
+| `help` | Show available commands |
+| `clear` | Clear screen |
+| `ls` | List files |
+| `cd` | Change directory (supports wildcards `cd fol*`) |
+| `mkdir` | Create directory |
+| `df` | Disk Usage |
+| `sysinfo`| System Information |
+| `reboot` | Reboot system |
+| `uptime` | System uptime |
+| `date` | Real World Time |
+| `monitor`| Real System Monitor (Hz, RAM, VRAM) |
 
 ## Build & Run
 
 1. **Prerequisites**:
    - Rust toolchain
-   - `wasm-pack`
+   - `trunk` (`cargo install trunk`)
 
-2. **Build**:
+2. **Run**:
    ```bash
-   wasm-pack build --target web
+   trunk serve --open
    ```
 
-3. **Run**:
+3. **Build Release**:
    ```bash
-   python -m http.server 8080 --bind 127.0.0.1
+   trunk build --release
    ```
-   Open [http://127.0.0.1:8080](http://127.0.0.1:8080).

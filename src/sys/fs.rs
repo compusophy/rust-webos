@@ -1,12 +1,14 @@
 use std::collections::HashMap;
 
 #[derive(Clone)]
+#[allow(dead_code)]
 pub enum NodeType {
     File,
     Directory,
 }
 
 #[derive(Clone)]
+#[allow(dead_code)]
 pub struct Node {
     pub name: String,
     pub node_type: NodeType,
@@ -26,6 +28,7 @@ impl Node {
         }
     }
 
+    #[allow(dead_code)]
     pub fn new_file(name: &str, content: Vec<u8>) -> Self {
         Self {
             name: name.to_string(),
@@ -46,12 +49,16 @@ pub struct FileSystem {
 
 impl FileSystem {
     pub fn new(size_mb: usize) -> Self {
-        Self {
+        let mut fs = Self {
             root: Node::new_dir("/"),
             current_path: Vec::new(),
             total_space: size_mb * 1024 * 1024,
             used_space: 0,
-        }
+        };
+        // Initialize standard directories
+        fs.mkdir("local").unwrap();
+        fs.mkdir("tmp").unwrap();
+        fs
     }
 
     // Navigate to a node, returning mutable reference if possible?
@@ -76,6 +83,22 @@ impl FileSystem {
 
         target_dir.children.insert(path.to_string(), Node::new_dir(path));
         self.used_space += 4096;
+        Ok(())
+    }
+
+    pub fn create_file(&mut self, path: &str) -> Result<(), String> {
+        if self.used_space + 10 > self.total_space { 
+            return Err("Disk full".to_string());
+        }
+
+        let path_clone = self.current_path.clone();
+        let target_dir = self.resolve_mut_dir(&path_clone)?;
+        if target_dir.children.contains_key(path) {
+             return Err("File or Directory exists".to_string());
+        }
+
+        target_dir.children.insert(path.to_string(), Node::new_file(path, Vec::new()));
+        self.used_space += 10; // Metadata overhead
         Ok(())
     }
 
@@ -115,9 +138,28 @@ impl FileSystem {
         let dir = self.resolve_dir(&self.current_path).unwrap_or(&self.root);
         let mut names: Vec<String> = dir.children.keys().cloned().collect();
         names.sort();
-        // Append "/" to directories for visual indication?
-        // Or handle in shell.
         names
+    }
+
+    pub fn match_entry(&self, pattern: &str) -> Option<String> {
+        let dir = self.resolve_dir(&self.current_path).unwrap_or(&self.root);
+        
+        // Direct match first
+        if dir.children.contains_key(pattern) {
+            return Some(pattern.to_string());
+        }
+
+        // Wildcard match
+        if pattern.ends_with('*') {
+            let prefix = &pattern[..pattern.len()-1];
+            for name in dir.children.keys() {
+                if name.starts_with(prefix) {
+                    return Some(name.clone());
+                }
+            }
+        }
+        
+        None
     }
     
     // Helpers
