@@ -75,6 +75,9 @@ pub fn tick() {
                 steps += 1;
             }
 
+            // Run process update once per frame (Wasm/Desktop)
+            machine.tick_process();
+
             // Render always happens once per browser frame
             // Map text mode to GPU VRAM (conceptually)
             let gui_mode = *machine.gui_mode.borrow();
@@ -112,9 +115,20 @@ pub fn on_keydown(key: String, _ctrl: bool, _alt: bool, _meta: bool) {
     MACHINE.with(|m| {
         if let Ok(mut borrow) = m.try_borrow_mut() {
             if let Some(machine) = borrow.as_mut() {
+                let code = match key.as_str() {
+                    "Enter" => 10,
+                    "Backspace" => 8,
+                    "ArrowUp" => 1, // Non-standard mapping
+                    "ArrowDown" => 2,
+                    "ArrowLeft" => 3,
+                    "ArrowRight" => 4,
+                    k if k.len() == 1 => k.chars().next().unwrap() as u32,
+                    _ => 0,
+                };
+
                 machine.events.borrow_mut().push_back(kernel::SystemEvent {
                     event_type: kernel::EventType::KeyDown,
-                    code: 0, // TODO: Map keys
+                    code, 
                     x: 0,
                     y: 0,
                 });

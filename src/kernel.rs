@@ -81,7 +81,8 @@ impl Machine {
             gui_mode.clone(),
             events.clone(),
             fs.clone(),
-            should_reset.clone()
+            should_reset.clone(),
+            shell.clone()
         );
         
         let now = web_sys::window().unwrap().performance().unwrap().now();
@@ -112,15 +113,16 @@ impl Machine {
          *self = new_machine;
     }
 
+    pub fn tick_process(&mut self) {
+        self.wasm.tick();
+    }
+
     pub fn step(&mut self, _input_op: Option<String>) {
          // CPU Cycle
         self.cpu.step(&mut self.bus);
         
         self.tick_count += 1;
         self.frames_buffer += 1; // Count cycle for FPS
-        
-        // Tick WASM (Process Step)
-        self.wasm.tick();
         
         match self.state {
             MachineState::Bios => {

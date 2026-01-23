@@ -20,11 +20,11 @@ impl Gpu {
         }
     }
 
-    pub fn put_pixel(&mut self, x: u32, y: u32, color: u32) {
-        if x >= self.width || y >= self.height {
+    pub fn put_pixel(&mut self, x: i32, y: i32, color: u32) {
+        if x < 0 || y < 0 || x >= self.width as i32 || y >= self.height as i32 {
             return;
         }
-        let idx = ((y * self.width + x) * 4) as usize;
+        let idx = ((y as u32 * self.width + x as u32) * 4) as usize;
         
         // Color format: 0xAABBGGRR
         let r = ((color >> 24) & 0xFF) as u8;
@@ -38,9 +38,19 @@ impl Gpu {
         self.buffer[idx + 3] = a;
     }
 
-    pub fn fill_rect(&mut self, x: u32, y: u32, w: u32, h: u32, color: u32) {
-        for iy in y..(y + h) {
-            for ix in x..(x + w) {
+    pub fn fill_rect(&mut self, x: i32, y: i32, w: i32, h: i32, color: u32) {
+        // Clip to screen bounds
+        let start_x = x.max(0);
+        let start_y = y.max(0);
+        let end_x = (x + w).min(self.width as i32);
+        let end_y = (y + h).min(self.height as i32);
+
+        if start_x >= end_x || start_y >= end_y {
+            return;
+        }
+
+        for iy in start_y..end_y {
+            for ix in start_x..end_x {
                 self.put_pixel(ix, iy, color);
             }
         }

@@ -1,6 +1,7 @@
+
+
 pub struct Shell {
     input_buffer: String,
-    // prompt: String, // Removed, we build it dynamically
     current_path: String,
     history: Vec<String>,
     history_index: Option<usize>,
@@ -12,10 +13,12 @@ struct CommandDef {
     desc: &'static str,
 }
 
-enum CmdResult {
+#[derive(PartialEq)]
+pub enum CmdResult {
     Success,
     Error,
     Reboot,
+    Clear,
 }
 
 const COMMANDS: &[CommandDef] = &[
@@ -137,7 +140,8 @@ impl Shell {
                 self.history.push(self.input_buffer.clone());
                 self.history_index = None;
             }
-            let reboot = self.execute_command(term, fs, wasm, events, ticks, hz);
+            // MODIFIED: Pass Some(wasm)
+            let reboot = self.execute_command(term, fs, Some(wasm), events, ticks, hz);
             self.input_buffer.clear();
             self.draw_prompt(term);
             return reboot;
@@ -185,32 +189,58 @@ impl Shell {
         }
         false
     }
-
-    fn execute_command(&mut self, term: &mut crate::term::Terminal, fs: &mut crate::sys::fs::FileSystem, wasm: &crate::sys::wasm::WasmRuntime, events: &mut std::collections::VecDeque<crate::kernel::SystemEvent>, ticks: u64, hz: f64) -> bool {
+    
+    // UPDATED: execute_command (separating IO)
+    pub fn execute_command(&mut self, term: &mut crate::term::Terminal, fs: &mut crate::sys::fs::FileSystem, wasm: Option<&crate::sys::wasm::WasmRuntime>, events: &mut std::collections::VecDeque<crate::kernel::SystemEvent>, ticks: u64, hz: f64) -> bool {
         let full_input = self.input_buffer.trim().to_string(); // Clone to break borrow
         if full_input.is_empty() {
-            return false;
+             return false;
         }
 
         // Split by "&&"
         let commands: Vec<&str> = full_input.split("&&").collect();
         
-        
         for cmd_str in commands {
-            let res = self.run_one_command(cmd_str.trim(), term, fs, wasm, events, ticks, hz);
+            let (res, output) = self.run_one_command(cmd_str.trim(), fs, wasm, events, ticks, hz);
+            
+            term.write_str(&output);
 
             match res {
                 CmdResult::Success => continue,
                 CmdResult::Error => break, // Stop chain on error
                 CmdResult::Reboot => return true,
+                CmdResult::Clear => term.reset(),
             }
         }
         false
     }
     
-    fn run_one_command(&mut self, cmd_str: &str, term: &mut crate::term::Terminal, fs: &mut crate::sys::fs::FileSystem, wasm: &crate::sys::wasm::WasmRuntime, _events: &mut std::collections::VecDeque<crate::kernel::SystemEvent>, ticks: u64, hz: f64) -> CmdResult {
+    pub fn execute_string(&mut self, full_input: &str, fs: &mut crate::sys::fs::FileSystem, wasm: Option<&crate::sys::wasm::WasmRuntime>, events: &mut std::collections::VecDeque<crate::kernel::SystemEvent>, ticks: u64, hz: f64) -> String {
+        let mut full_output = String::new();
+        if full_input.trim().is_empty() {
+            return full_output;
+        }
+        
+        let commands: Vec<&str> = full_input.split("&&").collect();
+        
+        for cmd_str in commands {
+            let (res, output) = self.run_one_command(cmd_str.trim(), fs, wasm, events, ticks, hz);
+            full_output.push_str(&output);
+
+            match res {
+                CmdResult::Success => continue,
+                CmdResult::Error => break, 
+                CmdResult::Reboot => full_output.push_str("System Rebooting...\n"),
+                CmdResult::Clear => {}, 
+            }
+        }
+        full_output
+    }
+    
+    fn run_one_command(&mut self, cmd_str: &str, fs: &mut crate::sys::fs::FileSystem, wasm: Option<&crate::sys::wasm::WasmRuntime>, _events: &mut std::collections::VecDeque<crate::kernel::SystemEvent>, ticks: u64, hz: f64) -> (CmdResult, String) {
+        let mut out = String::new();
         if cmd_str.is_empty() {
-             return CmdResult::Success;
+             return (CmdResult::Success, out);
         }
 
         let parts: Vec<&str> = cmd_str.split_whitespace().collect();
@@ -218,70 +248,69 @@ impl Shell {
 
         match cmd {
             "help" => {
-                term.write_str("available commands:\n");
+                out.push_str("available commands:\n");
                 for cmd_def in COMMANDS {
                      let msg = format!("  {:<8} - {}\n", cmd_def.name, cmd_def.desc.to_lowercase());
-                     term.write_str(&msg);
+                     out.push_str(&msg);
                 }
-                CmdResult::Success
+                (CmdResult::Success, out)
             },
             "clear" => {
-                term.reset();
-                CmdResult::Success
+                (CmdResult::Clear, out)
             },
             "ls" => {
                 let items = fs.list_dir();
                 for item in items {
-                    term.write_str(&item);
-                    term.write_str("  ");
+                    out.push_str(&item);
+                    out.push_str("  ");
                 }
-                term.write_char('\n');
-                CmdResult::Success
+                out.push('\n');
+                (CmdResult::Success, out)
             },
             "mkdir" => {
                 if parts.len() < 2 {
-                    term.write_str("usage: mkdir <name>\n");
-                    CmdResult::Error
+                    out.push_str("usage: mkdir <name>\n");
+                    (CmdResult::Error, out)
                 } else {
                     match fs.mkdir(parts[1]) {
-                        Ok(_) => CmdResult::Success,
+                        Ok(_) => (CmdResult::Success, out),
                         Err(e) => {
-                            term.write_str("error: ");
-                            term.write_str(&e);
-                            term.write_char('\n');
-                            CmdResult::Error
+                            out.push_str("error: ");
+                            out.push_str(&e);
+                            out.push('\n');
+                            (CmdResult::Error, out)
                         }
                     }
                 }
             },
             "touch" => {
                 if parts.len() < 2 {
-                    term.write_str("usage: touch <name>\n");
-                    CmdResult::Error
+                    out.push_str("usage: touch <name>\n");
+                    (CmdResult::Error, out)
                 } else {
                     match fs.create_file(parts[1]) {
-                        Ok(_) => CmdResult::Success,
+                        Ok(_) => (CmdResult::Success, out),
                         Err(e) => {
-                            term.write_str("error: ");
-                            term.write_str(&e);
-                            term.write_char('\n');
-                            CmdResult::Error
+                            out.push_str("error: ");
+                            out.push_str(&e);
+                            out.push('\n');
+                            (CmdResult::Error, out)
                         }
                     }
                 }
             },
             "rm" => {
                 if parts.len() < 2 {
-                    term.write_str("usage: rm <name>\n");
-                    CmdResult::Error
+                    out.push_str("usage: rm <name>\n");
+                    (CmdResult::Error, out)
                 } else {
                     match fs.remove_entry(parts[1]) {
-                        Ok(_) => CmdResult::Success,
+                        Ok(_) => (CmdResult::Success, out),
                         Err(e) => {
-                             term.write_str("error: ");
-                             term.write_str(&e);
-                             term.write_char('\n');
-                             CmdResult::Error
+                             out.push_str("error: ");
+                             out.push_str(&e);
+                             out.push('\n');
+                             (CmdResult::Error, out)
                         }
                     }
                 }
@@ -290,7 +319,7 @@ impl Shell {
                 if parts.len() < 2 {
                      match fs.cd("/") { _ => {} };
                      self.update_prompt(fs); 
-                     CmdResult::Success
+                     (CmdResult::Success, out)
                 } else {
                      let target = if let Some(matched) = fs.match_entry(parts[1]) {
                          matched
@@ -301,13 +330,13 @@ impl Shell {
                      match fs.cd(&target) {
                         Ok(_) => {
                             self.update_prompt(fs); 
-                            CmdResult::Success
+                            (CmdResult::Success, out)
                         },
                         Err(e) => {
-                            term.write_str("error: ");
-                            term.write_str(&e);
-                            term.write_char('\n');
-                            CmdResult::Error
+                            out.push_str("error: ");
+                            out.push_str(&e);
+                            out.push('\n');
+                            (CmdResult::Error, out)
                         }
                     }
                 }
@@ -316,55 +345,57 @@ impl Shell {
                 let total_kb = fs.total_space / 1024;
                 let used_kb = fs.used_space / 1024;
                 let msg = format!("disk usage:\n  used: {} kb\n  total: {} kb\n  free: {} kb\n", used_kb, total_kb, total_kb - used_kb);
-                term.write_str(&msg);
-                CmdResult::Success
+                out.push_str(&msg);
+                (CmdResult::Success, out)
             },
             "sysinfo" => {
-                term.write_str("system information:\n");
-                term.write_str("  kernel:  rust webos v0.1.0\n");
-                term.write_str("  arch:    wasm32-unknown-unknown\n");
+                out.push_str("system information:\n");
+                out.push_str("  kernel:  rust webos v0.1.0\n");
+                out.push_str("  arch:    wasm32-unknown-unknown\n");
                 let msg_cpu = format!("  cpu:     wasm-32 virtual core @ {:.2} hz\n", hz);
-                term.write_str(&msg_cpu);
-                term.write_str("  vram:    512x512 rgba (1 mb)\n");
-                term.write_str("  ram:     16 mb linear\n");
+                out.push_str(&msg_cpu);
+                out.push_str("  vram:    512x512 rgba (1 mb)\n");
+                out.push_str("  ram:     16 mb linear\n");
                 let msg_ticks = format!("  ticks:   {}\n", ticks);
-                term.write_str(&msg_ticks);
-                CmdResult::Success
+                out.push_str(&msg_ticks);
+                (CmdResult::Success, out)
             },
             "reboot" => {
-                CmdResult::Reboot
+                (CmdResult::Reboot, out)
             },
             "uptime" => {
                 let seconds = ticks as f64 / 60.0;
                 let msg = format!("uptime: {:.2} seconds ({} ticks)\n", seconds, ticks);
-                term.write_str(&msg);
-                CmdResult::Success
+                out.push_str(&msg);
+                (CmdResult::Success, out)
             },
             "date" => {
                 let date = js_sys::Date::new_0();
                 let msg = format!("{}\n", date.to_string());
-                term.write_str(&msg);
-                CmdResult::Success
+                out.push_str(&msg);
+                (CmdResult::Success, out)
             },
 
             "reset" => {
-                term.write_str("warning: this will wipe all local data.\n");
-                term.write_str("are you sure? (y/n) ");
+                out.push_str("warning: this will wipe all local data.\n");
+                out.push_str("are you sure? (y/n) ");
                 self.input_buffer.clear();
                 self.waiting_for_reset = true;
-                CmdResult::Success // Technically we pause here
+                (CmdResult::Success, out) 
             },
             "exec" => {
                 if parts.len() < 2 {
-                    term.write_str("usage: exec <path>\n");
-                    CmdResult::Error
+                    out.push_str("usage: exec <path>\n");
+                    (CmdResult::Error, out)
+                } else if wasm.is_none() {
+                     out.push_str("exec not supported in this environment\n");
+                     (CmdResult::Error, out)
                 } else {
+                    let wasm_rt = wasm.unwrap();
                     let path = parts[1];
-                    // Read file content
-                    let file_node = fs.resolve_dir(&fs.current_path) // Start from current dir defaults
+                    let file_node = fs.resolve_dir(&fs.current_path) 
                         .and_then(|d| d.children.get(path))
                         .or_else(|| {
-                             // Try absolute path resolution (simple /bin/hello.wasm check)
                              if path.starts_with("/bin/") {
                                  fs.root.children.get("bin").and_then(|b| b.children.get(&path[5..]))
                              } else {
@@ -375,49 +406,51 @@ impl Shell {
 
                     if let Some(node) = file_node {
                         if let crate::sys::fs::NodeType::File = node.node_type {
-                            term.write_str(&format!("executing {}...\n", path));
-                            match wasm.load(&node.content) {
-                                Ok(_) => {
-                                    // Loaded successfully. active_process is set.
-                                    CmdResult::Success
+                            out.push_str(&format!("executing {}...\n", path));
+                            match wasm_rt.load(&node.content) {
+                                Ok(captured_output) => {
+                                    out.push_str(&captured_output);
+                                    (CmdResult::Success, out)
                                 },
                                 Err(e) => {
-                                    term.write_str(&format!("execution error: {}\n", e));
-                                    CmdResult::Error
+                                    out.push_str(&format!("execution error: {}\n", e));
+                                    (CmdResult::Error, out)
                                 }
                             }
                         } else {
-                             term.write_str("not a file\n");
-                             CmdResult::Error
+                             out.push_str("not a file\n");
+                             (CmdResult::Error, out)
                         }
                     } else {
-                        // Fallback: Try resolving properly if we can or just hack it for "hello.wasm"
                          let dir = fs.resolve_dir(&fs.current_path).unwrap_or(&fs.root);
                          if let Some(node) = dir.children.get(path) {
                                if let crate::sys::fs::NodeType::File = node.node_type {
-                                    match wasm.load(&node.content) {
-                                        Ok(_) => CmdResult::Success,
+                                    match wasm_rt.load(&node.content) {
+                                        Ok(captured_output) => {
+                                            out.push_str(&captured_output);
+                                            (CmdResult::Success, out)
+                                        },
                                         Err(e) => {
-                                             term.write_str(&format!("error: {}\n", e));
-                                             CmdResult::Error
+                                             out.push_str(&format!("error: {}\n", e));
+                                             (CmdResult::Error, out)
                                         }
                                     }
                                } else {
-                                   term.write_str("not a file\n");
-                                   CmdResult::Error
+                                   out.push_str("not a file\n");
+                                   (CmdResult::Error, out)
                                }
                          } else {
-                             term.write_str("file not found\n");
-                             CmdResult::Error
+                             out.push_str("file not found\n");
+                             (CmdResult::Error, out)
                          }
                     }
                 }
             },
             _ => {
-                term.write_str("unknown command: ");
-                term.write_str(cmd);
-                term.write_char('\n');
-                CmdResult::Error
+                out.push_str("unknown command: ");
+                out.push_str(cmd);
+                out.push('\n');
+                (CmdResult::Error, out)
             }
         }
     }

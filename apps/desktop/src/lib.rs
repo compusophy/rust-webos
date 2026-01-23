@@ -37,11 +37,12 @@ pub extern "C" fn step() {
                 let res = sys_poll_event(event_bytes.as_mut_ptr());
                 if res == 1 {
                     let type_u32 = u32::from_le_bytes(event_bytes[0..4].try_into().unwrap());
-                    let _code = u32::from_le_bytes(event_bytes[4..8].try_into().unwrap());
+                    let code = u32::from_le_bytes(event_bytes[4..8].try_into().unwrap());
                     let x = i32::from_le_bytes(event_bytes[8..12].try_into().unwrap());
                     let y = i32::from_le_bytes(event_bytes[12..16].try_into().unwrap());
                     
                     match type_u32 {
+                        1 => wm.handle_key(code),
                         3 => wm.handle_mouse_down(x, y),
                         4 => wm.handle_mouse_up(),
                         5 => wm.handle_mouse_move(x, y),

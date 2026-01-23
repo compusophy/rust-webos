@@ -1,7 +1,7 @@
 use crate::gfx::Context;
 use font8x8::{BASIC_FONTS, UnicodeFonts};
 
-pub fn draw_char(ctx: &mut Context, x: u32, y: u32, c: char, color: u32) {
+pub fn draw_char(ctx: &mut Context, x: i32, y: i32, c: char, color: u32) {
     // We use BASIC_FONTS which covers ASCII
     if let Some(glyph) = BASIC_FONTS.get(c) {
          for (row_i, byte) in glyph.iter().enumerate() {
@@ -10,7 +10,7 @@ pub fn draw_char(ctx: &mut Context, x: u32, y: u32, c: char, color: u32) {
             // from some docs: "Bit 0 is the first column".
             for col_i in 0..8 {
                 if (byte & (1 << col_i)) != 0 {
-                    ctx.put_pixel(x + col_i as u32, y + row_i as u32, color);
+                    ctx.put_pixel(x + col_i as i32, y + row_i as i32, color);
                 }
             }
         }

@@ -136,19 +136,20 @@ impl Terminal {
         let char_h = 16;
         
         // Fill the left padding (offset) with default background to prevent artifacts
+        // Fill the left padding (offset) with default background to prevent artifacts
         if offset_x > 0 {
-             ctx.fill_rect(0, 0, offset_x, (self.rows * char_h) as u32, self.default_bg);
+             ctx.fill_rect(0, 0, offset_x as i32, (self.rows * char_h) as i32, self.default_bg);
         }
         
         for y in 0..self.rows {
             for x in 0..self.cols {
                 let cell = &self.buffer[y * self.cols + x];
-                let draw_x = offset_x + (x * char_w) as u32;
-                let draw_y = offset_y + (y * char_h) as u32;
+                let draw_x = (offset_x + (x * char_w) as u32) as i32;
+                let draw_y = (offset_y + (y * char_h) as u32) as i32;
 
                 // Draw background only if opaque
                 if (cell.bg & 0xFF) != 0 {
-                    ctx.fill_rect(draw_x, draw_y, char_w as u32, char_h as u32, cell.bg);
+                    ctx.fill_rect(draw_x, draw_y, char_w as i32, char_h as i32, cell.bg);
                 }
                 
                 // Draw char centered vertically in 16px cell (offset +4)
@@ -158,8 +159,8 @@ impl Terminal {
         
         // Draw cursor
         if self.cursor_visible {
-            let cx = offset_x + (self.cursor_x * char_w) as u32;
-            let cy = offset_y + (self.cursor_y * char_h) as u32;
+            let cx = (offset_x + (self.cursor_x * char_w) as u32) as i32;
+            let cy = (offset_y + (self.cursor_y * char_h) as u32) as i32;
             
             // Vertical Bar Cursor
             // Thicker (4px) and vertically centered on the 16px cell with slight overflow relative to font.

@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::rc::Rc;
 use std::cell::RefCell;
-use wasmi::{Engine, Linker, Module, Store, Caller, Instance};
+use wasmi::{Engine, Linker, Module, Store, Caller, Instance, AsContextMut};
 
 pub struct WasmRuntime {
     engine: Engine,
@@ -11,6 +11,7 @@ pub struct WasmRuntime {
     events: Rc<RefCell<VecDeque<crate::kernel::SystemEvent>>>,
     fs: Rc<RefCell<crate::sys::fs::FileSystem>>,
     should_reset: Rc<RefCell<bool>>,
+    shell: Rc<RefCell<crate::sys::shell::Shell>>,
     
     active_process: RefCell<Option<ActiveProcess>>,
 }
@@ -21,18 +22,13 @@ struct ActiveProcess {
 }
 
 pub struct WasmContext {
-    // We hold Rcs here too? Or weak?
-    // The Host Functions need access to the data.
-    // If we use Rcs, we can clone them into the closure?
-    // WasmContext stores "Host State".
-    // Actually, Host functions receive `Caller<T>`. `T` is WasmContext.
-    // So WasmContext should hold the Rcs.
     pub term: Rc<RefCell<crate::term::Terminal>>,
     pub gpu: Rc<RefCell<crate::hw::gpu::Gpu>>,
     pub gui_mode: Rc<RefCell<bool>>,
     pub events: Rc<RefCell<VecDeque<crate::kernel::SystemEvent>>>,
     pub fs: Rc<RefCell<crate::sys::fs::FileSystem>>,
     pub should_reset: Rc<RefCell<bool>>,
+    pub shell: Rc<RefCell<crate::sys::shell::Shell>>,
 }
 
 impl WasmRuntime {
@@ -43,6 +39,7 @@ impl WasmRuntime {
         events: Rc<RefCell<VecDeque<crate::kernel::SystemEvent>>>,
         fs: Rc<RefCell<crate::sys::fs::FileSystem>>,
         should_reset: Rc<RefCell<bool>>,
+        shell: Rc<RefCell<crate::sys::shell::Shell>>,
     ) -> Self {
         let engine = Engine::default();
         Self {
@@ -53,13 +50,18 @@ impl WasmRuntime {
             events,
             fs,
             should_reset,
+            shell,
             active_process: RefCell::new(None),
         }
     }
 
-    pub fn load(&self, wasm_bytes: &[u8]) -> Result<(), String> {
+    pub fn load(&self, wasm_bytes: &[u8]) -> Result<String, String> {
         let module = Module::new(&self.engine, wasm_bytes)
             .map_err(|e| format!("failed to create module: {}", e))?;
+        
+        // Capture output for this execution (Arc<Mutex> for Send closure)
+        let output_buffer = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        let output_clone = output_buffer.clone();
 
         let ctx = WasmContext {
             term: self.term.clone(),
@@ -68,25 +70,133 @@ impl WasmRuntime {
             events: self.events.clone(),
             fs: self.fs.clone(),
             should_reset: self.should_reset.clone(),
+            shell: self.shell.clone(),
         };
 
         let mut store = Store::new(&self.engine, ctx);
         let mut linker = Linker::new(&self.engine);
         
-        // --- Host Functions ---
+        // ... linker definitions ...
+        
+        // NEW: sys_exec host function
 
-        linker.func_wrap("env", "sys_print", |caller: Caller<WasmContext>, ptr: i32, len: i32| {
+        linker.func_wrap("env", "sys_print", move |caller: Caller<WasmContext>, ptr: i32, len: i32| {
             if let Some(extern_mem) = caller.get_export("memory").and_then(|e| e.into_memory()) {
                 let mut buffer = vec![0u8; len as usize];
                 if extern_mem.read(&caller, ptr as usize, &mut buffer).is_ok() {
                     if let Ok(msg) = String::from_utf8(buffer) {
-                        let term = caller.data().term.clone(); // Clone Rc
-                        let mut term = term.borrow_mut();
-                        term.write_str(&msg);
-                        term.write_char('\n');
+                        // Write to local capture capture buffer
+                        if let Ok(mut out) = output_clone.lock() {
+                             out.push_str(&msg);
+                             out.push('\n');
+                        }
+
+                        if let Ok(mut term_guard) = caller.data().term.try_borrow_mut() {
+                            term_guard.write_str(&msg);
+                            term_guard.write_char('\n');
+                        } else {
+                            // KERNEL PANIC RECOVERY: Terminal Locked
+                            // Fallback to direct GPU write to ensure "Real" output visibility
+                            if let Ok(mut gpu) = caller.data().gpu.try_borrow_mut() {
+                                let mut draw_x = 10;
+                                let draw_y = 480; // Bottom of screen overlap
+                                // Draw Red Alert Text
+                                let alert = format!("KERNEL I/O: {}", msg);
+                                for c in alert.chars() {
+                                     crate::gfx::font::draw_char(&mut gpu, draw_x, draw_y, c, 0xFF_00_00_FF);
+                                     draw_x += 8;
+                                }
+                            }
+                        }
                     }
                 }
             }
+        }).unwrap();
+
+        linker.func_wrap("env", "sys_fs_list", |mut caller: Caller<WasmContext>, path_ptr: i32, path_len: i32, out_ptr: i32, out_len: i32| -> i32 {
+             if let Some(extern_mem) = caller.get_export("memory").and_then(|e| e.into_memory()) {
+                // Read Path
+                let mut path_buf = vec![0u8; path_len as usize];
+                if extern_mem.read(&caller, path_ptr as usize, &mut path_buf).is_ok() {
+                    if let Ok(path_str) = String::from_utf8(path_buf) {
+                        // Prepare output in a separate scope to drop fs borrow
+                        let output_data = {
+                            let fs = caller.data().fs.borrow();
+                            
+                            // Parse Path
+                            let path_parts: Vec<String> = path_str.split('/').filter(|s| !s.is_empty()).map(|s| s.to_string()).collect();
+                            
+                            let target_node = if path_str == "/" {
+                                Some(&fs.root)
+                            } else {
+                                fs.resolve_dir(&path_parts)
+                            };
+                            
+                            if let Some(node) = target_node {
+                                 if let crate::sys::fs::NodeType::Directory = node.node_type {
+                                     let mut output = String::new();
+                                     if !path_parts.is_empty() {
+                                         output.push_str("D:..\n");
+                                     }
+                                     
+                                     let mut entries: Vec<_> = node.children.iter().collect();
+                                     entries.sort_by_key(|(k,_)| *k);
+                                     
+                                     for (name, child) in entries {
+                                         let prefix = match child.node_type {
+                                             crate::sys::fs::NodeType::Directory => "D",
+                                             crate::sys::fs::NodeType::File => "F",
+                                         };
+                                         output.push_str(&format!("{}:{}\n", prefix, name));
+                                     }
+                                     Some(output)
+                                 } else {
+                                     None
+                                 }
+                            } else {
+                                None
+                            }
+                        }; // fs borrow dropped here
+
+                        if let Some(output) = output_data {
+                             let bytes = output.as_bytes();
+                             let write_len = bytes.len().min(out_len as usize);
+                             
+                             extern_mem.write(&mut caller.as_context_mut(), out_ptr as usize, &bytes[0..write_len]).ok();
+                             return write_len as i32;
+                        }
+                    }
+                }
+             }
+             -1 // Error
+        }).unwrap();
+
+        // NEW: sys_exec host function
+        linker.func_wrap("env", "sys_exec", |mut caller: Caller<WasmContext>, cmd_ptr: i32, cmd_len: i32, out_ptr: i32, out_len: i32| -> i32 {
+            if let Some(extern_mem) = caller.get_export("memory").and_then(|e| e.into_memory()) {
+                // Read Command String
+                let mut cmd_buf = vec![0u8; cmd_len as usize];
+                if extern_mem.read(&caller, cmd_ptr as usize, &mut cmd_buf).is_ok() {
+                    if let Ok(cmd_str) = String::from_utf8(cmd_buf) {
+                        
+                        let output = {
+                            let mut shell = caller.data().shell.borrow_mut();
+                            let mut fs = caller.data().fs.borrow_mut();
+                            let mut events = caller.data().events.borrow_mut();
+                            
+                            // We pass None for wasm because `sys_exec` cannot launch new Nested Wasm processes currently.
+                            // execute_string returns String
+                            shell.execute_string(&cmd_str, &mut fs, None, &mut events, 0, 0.0)
+                        };
+
+                        let bytes = output.as_bytes();
+                        let write_len = bytes.len().min(out_len as usize);
+                        extern_mem.write(&mut caller.as_context_mut(), out_ptr as usize, &bytes[0..write_len]).ok();
+                        return write_len as i32;
+                    }
+                }
+            }
+            -1
         }).unwrap();
 
         linker.func_wrap("env", "sys_reset", |caller: Caller<WasmContext>| {
@@ -97,6 +207,11 @@ impl WasmRuntime {
                 }
             }
             // Trigger Reboot
+            *caller.data().should_reset.borrow_mut() = true;
+        }).unwrap();
+
+        linker.func_wrap("env", "sys_reboot", |caller: Caller<WasmContext>| {
+            // Trigger Reboot WITHOUT Wiping Data
             *caller.data().should_reset.borrow_mut() = true;
         }).unwrap();
 
@@ -113,7 +228,7 @@ impl WasmRuntime {
         }).unwrap();
 
         linker.func_wrap("env", "sys_draw_rect", |caller: Caller<WasmContext>, x: i32, y: i32, w: i32, h: i32, color: i32| {
-             caller.data().gpu.borrow_mut().fill_rect(x as u32, y as u32, w as u32, h as u32, color as u32);
+             caller.data().gpu.borrow_mut().fill_rect(x, y, w, h, color as u32);
         }).unwrap();
 
         linker.func_wrap("env", "sys_draw_text", |caller: Caller<WasmContext>, ptr: i32, len: i32, x: i32, y: i32, color: i32| {
@@ -122,8 +237,8 @@ impl WasmRuntime {
                 if extern_mem.read(&caller, ptr as usize, &mut buffer).is_ok() {
                     if let Ok(msg) = String::from_utf8(buffer) {
                         let mut gpu = caller.data().gpu.borrow_mut();
-                        let mut draw_x = x as u32;
-                        let draw_y = y as u32;
+                        let mut draw_x = x;
+                        let draw_y = y;
                         for c in msg.chars() {
                              crate::gfx::font::draw_char(&mut gpu, draw_x, draw_y, c, color as u32);
                              draw_x += 8; // Advance cursor (assume 8px width)
@@ -190,18 +305,24 @@ impl WasmRuntime {
                 .map_err(|e| format!("start error: {}", e))?;
              // If it returns, we are done. Don't save process unless we want 'step'?
              // Non-async apps don't have step.
-             return Ok(());
+             let res = output_buffer.lock().unwrap().clone();
+             return Ok(res);
         }
 
         // Save process if it has a `step` function
         if let Ok(_) = instance.get_typed_func::<(), ()>(&store, "step") {
-            *self.active_process.borrow_mut() = Some(ActiveProcess {
-                store,
-                instance,
-            });
+            if let Ok(mut guard) = self.active_process.try_borrow_mut() {
+                *guard = Some(ActiveProcess {
+                    store,
+                    instance,
+                });
+            } else {
+                 web_sys::console::log_1(&"Failed to save active process: busy".into());
+            }
         }
         
-        Ok(())
+        let res = output_buffer.lock().unwrap().clone();
+        Ok(res)
     }
 
     pub fn tick(&self) {
