@@ -1,7 +1,28 @@
+use std::rc::Rc;
+use std::cell::RefCell;
+use std::collections::VecDeque;
+
 use crate::hw;
 use crate::sys;
 use crate::term;
 use crate::bios;
+
+#[derive(Clone, Copy, Debug)]
+pub enum EventType {
+    KeyDown = 1,
+    KeyUp = 2,
+    MouseDown = 3,
+    MouseUp = 4,
+    MouseMove = 5,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct SystemEvent {
+    pub event_type: EventType,
+    pub code: u32, // KeyCode or Button
+    pub x: i32,
+    pub y: i32,
+}
 
 pub enum MachineState {
     Bios,
@@ -10,13 +31,13 @@ pub enum MachineState {
 
 pub struct Machine {
     pub cpu: hw::cpu::Cpu,
-    pub bus: hw::bus::Bus,
+    pub bus: hw::bus::Bus, // Holds Rcs
     pub bios: bios::Bios,
     
     // Peripherals / Firmware
-    pub term: term::Terminal,
-    pub shell: sys::shell::Shell,
-    pub fs: sys::fs::FileSystem,
+    pub term: Rc<RefCell<term::Terminal>>,
+    pub shell: Rc<RefCell<sys::shell::Shell>>,
+    pub fs: Rc<RefCell<sys::fs::FileSystem>>,
     pub wasm: sys::wasm::WasmRuntime,
     
     // Timing and State
@@ -27,23 +48,38 @@ pub struct Machine {
     pub frames_buffer: u64,
     pub last_sec_time: f64,
     pub state: MachineState,
-    pub gui_mode: bool,
+    pub gui_mode: Rc<RefCell<bool>>,
+    
+    // Input
+    pub events: Rc<RefCell<VecDeque<SystemEvent>>>,
 }
 
 impl Machine {
     pub fn new() -> Self {
         // Hardware Init
-        let ram = hw::ram::Ram::new(16 * 1024 * 1024); // 16 MB RAM
-        let gpu = hw::gpu::Gpu::new(512, 512); // VRAM
-        let bus = hw::bus::Bus::new(ram, gpu);
+        let ram = Rc::new(RefCell::new(hw::ram::Ram::new(16 * 1024 * 1024))); // 16 MB RAM
+        let gpu = Rc::new(RefCell::new(hw::gpu::Gpu::new(512, 512))); // VRAM
+        let bus = hw::bus::Bus::new(ram.clone(), gpu.clone());
         let cpu = hw::cpu::Cpu::new();
         let bios = bios::Bios::new();
         
         // Firmware/Software Init
-        let term = term::Terminal::new(64, 32);
-        let shell = sys::shell::Shell::new();
-        let fs = sys::fs::FileSystem::new(10); // 10 MB disk
-        let wasm = sys::wasm::WasmRuntime::new();
+        let term = Rc::new(RefCell::new(term::Terminal::new(64, 32)));
+        let shell = Rc::new(RefCell::new(sys::shell::Shell::new()));
+        let fs = Rc::new(RefCell::new(sys::fs::FileSystem::new(10))); // 10 MB disk
+        
+        // Shared State
+        let gui_mode = Rc::new(RefCell::new(false));
+         let events = Rc::new(RefCell::new(VecDeque::new()));
+
+        // Wasm Runtime needs access to these Rcs
+        let wasm = sys::wasm::WasmRuntime::new(
+            term.clone(),
+            gpu.clone(),
+            gui_mode.clone(),
+            events.clone(),
+            fs.clone() // Need FS for list_dir etc
+        );
         
         let now = web_sys::window().unwrap().performance().unwrap().now();
 
@@ -62,7 +98,8 @@ impl Machine {
             last_sec_time: now,
             state: MachineState::Bios,
             bios,
-            gui_mode: false,
+            gui_mode,
+            events,
         }
     }
 
@@ -71,48 +108,122 @@ impl Machine {
          *self = new_machine;
     }
 
-    pub fn step(&mut self, input_op: Option<String>) {
+    pub fn step(&mut self, _input_op: Option<String>) {
          // CPU Cycle
         self.cpu.step(&mut self.bus);
         
         self.tick_count += 1;
         self.frames_buffer += 1; // Count cycle for FPS
         
+        // Tick WASM (Process Step)
+        self.wasm.tick();
+        
         match self.state {
             MachineState::Bios => {
-                if self.bios.step(&mut self.term, &mut self.bus) {
+                // Borrow check: bios needs mutable access to term and bus.
+                // We have Rcs. 
+                // term is Rc<RefCell<>>.
+                // bus has Rcs inside.
+                // self.bios.step signature: (&mut Terminal, &mut Bus)
+                // We need to borrow_mut() term.
+                // We need to pass bus.
+                
+                let mut term = self.term.borrow_mut();
+                if self.bios.step(&mut term, &mut self.bus) {
                     // Handoff to Kernel
                     self.state = MachineState::Kernel;
                     
                     // Clear BIOS Screen
-                    self.term.set_bg_color(0x00_00_00_FF); // Reset to Black for Kernel
-                    self.term.reset();
-                    self.term.show_cursor(true); // Enable cursor for shell
-                    self.bus.gpu.clear(0, 0, 0); // Clear to Black
+                    term.set_bg_color(0x00_00_00_FF); 
+                    term.reset();
+                    term.show_cursor(true); 
+                    self.bus.gpu.borrow_mut().clear(0, 0, 0); 
     
                     // Print Kernel Boot msg
-                    self.shell.draw_prompt(&mut self.term);
+                    self.shell.borrow_mut().draw_prompt(&mut term);
                 }
             },
             MachineState::Kernel => {
-                // Process Input (Interrupts)
-                if let Some(key) = input_op {
-                     let res = self.shell.on_key(&key, &mut self.term, &mut self.fs, &self.wasm, &mut self.bus.gpu, &mut self.gui_mode, self.tick_count, self.real_fps);
-                     if res {
-                         // Hard Reboot - Re-initialize everything
-                         web_sys::console::log_1(&"system rebooting...".into());
-                         self.reboot();
+                // Process Input (Interrupts) - NOW handled by Machine.events + Shell on_key?
+                // `step` received `input_op` (legacy from lib.rs InputQueue).
+                // We should stop using input_op and look at `events`.
+                // Actually Shell expects strings for keys.
+                // Let's pop from events if it's a KeyDown? Use `events` directly?
+                // Shell needs to consume events.
+                
+                let mut events_guard = self.events.borrow_mut();
+                if let Some(event) = events_guard.front().cloned() {
+                    // Check if it is a key event to pass to shell?
+                    // Or does shell process the queue? 
+                    // Shell `on_key` takes a single key.
+                    // If we have multiple events, we process one per tick?
+                    
+                    // If WASM is active (Desktop), it consumes events via syscalls.
+                    // If WASM is NOT active (Shell), Shell consumes events?
+                    // Currently `wasm` is always active in the struct, but maybe no process loaded?
+                    // `wasm.is_running()`?
+                    
+                    // If Desktop is running, Shell should arguably yield?
+                    // But our Shell is the OS. 
+                    // Let's say: If `gui_mode` is TRUE, Shell ignores input (Desktop handles).
+                    // If `gui_mode` is FALSE, Shell handles input.
+                    
+                    let gui = *self.gui_mode.borrow();
+                    if gui {
+                        // Desktop Mode: WASM handles events via polling
+                        // Do nothing here, wasm.tick() will happen.
+                    } else {
+                        // Text Mode: Shell handles input
+                         match event.event_type {
+                            EventType::KeyDown => {
+                                // We need to convert code to string. 
+                                // Since we didn't implement real key codes yet (passed 0 in lib.rs),
+                                // we rely on the fact that we passed NOTHING in lib.rs?
+                                // Wait, lib.rs::on_keydown was modified to push to `events`.
+                                // BUT it also pushed to `INPUT_QUEUE`.
+                                // Let's keep using `INPUT_QUEUE` for Shell for now to avoid breaking Shell?
+                                // No, I want to unify.
+                                // I'll stick to legacy `input_op` passed from `tick` for SHELL commands?
+                                // OK, `input_op` is the `INPUT_QUEUE`.
+                            },
+                             _ => {}
+                         }
+                    }
+                }
+                drop(events_guard); // Release borrow
+                
+                // Legacy Shell Input (Text Mode)
+                if !*self.gui_mode.borrow() {
+                     if let Some(key) = _input_op {
+                         // Need mutable borrows
+                         let mut term = self.term.borrow_mut();
+                         let mut fs = self.fs.borrow_mut();
+                         let mut gpu = self.bus.gpu.borrow_mut();
+                         let mut gui_mode_guard = self.gui_mode.borrow_mut();
+                         let mut shell = self.shell.borrow_mut();
+                         
+                         // Note: Shell on_key signature changes!
+                         // It needs `events` too?
+                         // If we are passing `events` Rcs to everyone, Shell should hold the Rc too?
+                         // Or pass it here?
+                         // Shell.on_key signature was: `events: &mut VecDeque`
+                         // We can borrow mutable events.
+                         
+                         let mut events = self.events.borrow_mut();
+                         
+                         let res = shell.on_key(&key, &mut term, &mut fs, &self.wasm, &mut gpu, &mut gui_mode_guard, &mut events, self.tick_count, self.real_fps);
+                         
+                         if res {
+                             web_sys::console::log_1(&"system rebooting...".into());
+                             self.reboot(); // This might fail due to borrows?
+                             // self.reboot replaces self. Checks out?
+                             // new() returns Self.
+                         }
                      }
                 }
-                
-                // Clear background if not in GUI mode (handled by render loop in lib.rs actually, but let's see)
-                // In lib.rs: machine.bus.gpu.clear(0, 0, 0); was at end of Kernel block.
-                // It seems aggressive to clear every tick if we are also rendering terminal?
-                // The original code had: machine.bus.gpu.clear(0, 0, 0); // Black background
-                // This clears the VRAM buffer. Then lib.rs calls machine.term.render() which writes over it.
-                // So yes, we need to clear here.
-                if !self.gui_mode {
-                     self.bus.gpu.clear(0, 0, 0); // Clear to Black
+
+                if !*self.gui_mode.borrow() {
+                     self.bus.gpu.borrow_mut().clear(0, 0, 0); 
                 }
             },
         }

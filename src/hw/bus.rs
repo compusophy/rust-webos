@@ -1,14 +1,16 @@
+use std::rc::Rc;
+use std::cell::RefCell;
 use super::ram::Ram;
 use super::gpu::Gpu;
 
 #[allow(dead_code)]
 pub struct Bus {
-    pub ram: Ram,
-    pub gpu: Gpu,
+    pub ram: Rc<RefCell<Ram>>,
+    pub gpu: Rc<RefCell<Gpu>>,
 }
 
 impl Bus {
-    pub fn new(ram: Ram, gpu: Gpu) -> Self {
+    pub fn new(ram: Rc<RefCell<Ram>>, gpu: Rc<RefCell<Gpu>>) -> Self {
         Self {
             ram,
             gpu,

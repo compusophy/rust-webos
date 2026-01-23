@@ -7,8 +7,8 @@
     <title>wasmix</title>
     
 <script type="module">
-import init, * as bindings from '/wasmix-322d2e0e8e4d7b7b.js';
-const wasm = await init({ module_or_path: '/wasmix-322d2e0e8e4d7b7b_bg.wasm' });
+import init, * as bindings from '/wasmix-b1647f100a27b040.js';
+const wasm = await init({ module_or_path: '/wasmix-b1647f100a27b040_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -43,14 +43,14 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
             top: -1000px;
         }
     </style>
-<link rel="modulepreload" href="/wasmix-322d2e0e8e4d7b7b.js" crossorigin="anonymous" integrity="sha384-SMSma/YzwH2nRB34PAnvuybDyqs01rtM4ypMq+GKJiy/sBzBN+/VhDl1H3/S+0kq"><link rel="preload" href="/wasmix-322d2e0e8e4d7b7b_bg.wasm" crossorigin="anonymous" integrity="sha384-5ZdLrD2Qh8kFOHromKrXAXZn5OS8yiT+chS6yCPYggpoc6vU3FQO5fKiCEfdcK42" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/wasmix-b1647f100a27b040.js" crossorigin="anonymous" integrity="sha384-AgB+HScNW/cwqoQG4j7WXufMTft8QV4B7Q8vd3tNOMiwpKQMWcigqlnJnK7qw4Rb"><link rel="preload" href="/wasmix-b1647f100a27b040_bg.wasm" crossorigin="anonymous" integrity="sha384-btiVsclhr7Ort+6zOY4VwCW5QPcqv4x4sO/k01grdBK8ELDYwTisJ16blQ0PHd49" as="fetch" type="application/wasm"></head>
 
 <body>
     <canvas id="screen" width="512" height="512"></canvas>
     <input type="text" id="hidden-input" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
     <script type="module">
         window.addEventListener("TrunkApplicationStarted", async (e) => {
-            const { init_os, tick, on_keydown, on_keyup, get_video_buffer_ptr } = window.wasmBindings;
+            const { init_os, tick, on_keydown, on_keyup, on_mousedown, on_mouseup, on_mousemove, get_video_buffer_ptr } = window.wasmBindings;
             const wasm = e.detail.wasm;
 
             // Initialize the OS (memory, state)
@@ -139,6 +139,34 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 
                 requestAnimationFrame(step);
             }
+
+            // Mouse Handling
+            canvas.addEventListener('mousemove', (e) => {
+                const rect = canvas.getBoundingClientRect();
+                const x = (e.clientX - rect.left) * (canvas.width / rect.width);
+                const y = (e.clientY - rect.top) * (canvas.height / rect.height);
+                if (window.wasmBindings.on_mousemove) {
+                    window.wasmBindings.on_mousemove(Math.floor(x), Math.floor(y));
+                }
+            });
+
+            canvas.addEventListener('mousedown', (e) => {
+                const rect = canvas.getBoundingClientRect();
+                const x = (e.clientX - rect.left) * (canvas.width / rect.width);
+                const y = (e.clientY - rect.top) * (canvas.height / rect.height);
+                if (window.wasmBindings.on_mousedown) {
+                    window.wasmBindings.on_mousedown(Math.floor(x), Math.floor(y), e.button);
+                }
+            });
+
+            canvas.addEventListener('mouseup', (e) => {
+                const rect = canvas.getBoundingClientRect();
+                const x = (e.clientX - rect.left) * (canvas.width / rect.width);
+                const y = (e.clientY - rect.top) * (canvas.height / rect.height);
+                if (window.wasmBindings.on_mouseup) {
+                    window.wasmBindings.on_mouseup(Math.floor(x), Math.floor(y), e.button);
+                }
+            });
 
             requestAnimationFrame(step);
         });

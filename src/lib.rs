@@ -77,8 +77,11 @@ pub fn tick() {
 
             // Render always happens once per browser frame
             // Map text mode to GPU VRAM (conceptually)
-            if !machine.gui_mode {
-                machine.term.render(&mut machine.bus.gpu, 4, 0);
+            let gui_mode = *machine.gui_mode.borrow();
+            if !gui_mode {
+                let mut term = machine.term.borrow_mut();
+                let mut gpu = machine.bus.gpu.borrow_mut();
+                term.render(&mut gpu, 4, 0);
             }
         }
     });
@@ -88,7 +91,16 @@ pub fn tick() {
 pub fn get_video_buffer_ptr() -> *const u8 {
     MACHINE.with(|m| {
         if let Some(machine) = m.borrow().as_ref() {
-            machine.bus.gpu.buffer.as_ptr()
+             // We need to return a pointer that persists...
+             // The pointer is into the Vec<u8> inside Gpu.
+             // As long as resize doesn't happen, it's valid.
+             // But we can't keep a borrow active return a pointer from it strictly safely if RefCell.
+             // unsafe { machine.bus.gpu.as_ptr().... }
+             // RefCell::as_ptr returns a raw ptr to the value.
+             // (*machine.bus.gpu.as_ptr()).buffer.as_ptr()
+             
+             // Safer way: borrow, get ptr, release borrow. Ptr remains valid if buffer not moved.
+             machine.bus.gpu.borrow().buffer.as_ptr()
         } else {
             std::ptr::null()
         }
@@ -97,6 +109,18 @@ pub fn get_video_buffer_ptr() -> *const u8 {
 
 #[wasm_bindgen]
 pub fn on_keydown(key: String, _ctrl: bool, _alt: bool, _meta: bool) {
+    MACHINE.with(|m| {
+        if let Some(machine) = m.borrow_mut().as_mut() {
+             machine.events.borrow_mut().push_back(kernel::SystemEvent {
+                 event_type: kernel::EventType::KeyDown,
+                 code: 0, // TODO: Map keys
+                 x: 0,
+                 y: 0,
+             });
+        }
+    });
+    
+    // Keep legacy input queue for Shell
     INPUT_QUEUE.with(|q| {
         if let Some(queue) = q.borrow_mut().as_mut() {
             queue.push_back(key);
@@ -106,5 +130,56 @@ pub fn on_keydown(key: String, _ctrl: bool, _alt: bool, _meta: bool) {
 
 #[wasm_bindgen]
 pub fn on_keyup(_key: String) {
-    // Optional
+    MACHINE.with(|m| {
+        if let Some(machine) = m.borrow_mut().as_mut() {
+             machine.events.borrow_mut().push_back(kernel::SystemEvent {
+                 event_type: kernel::EventType::KeyUp,
+                 code: 0, 
+                 x: 0,
+                 y: 0,
+             });
+        }
+    });
+}
+
+#[wasm_bindgen]
+pub fn on_mousedown(x: i32, y: i32, button: i32) {
+    MACHINE.with(|m| {
+        if let Some(machine) = m.borrow_mut().as_mut() {
+             machine.events.borrow_mut().push_back(kernel::SystemEvent {
+                 event_type: kernel::EventType::MouseDown,
+                 code: button as u32,
+                 x,
+                 y,
+             });
+        }
+    });
+}
+
+#[wasm_bindgen]
+pub fn on_mouseup(x: i32, y: i32, button: i32) {
+    MACHINE.with(|m| {
+        if let Some(machine) = m.borrow_mut().as_mut() {
+             machine.events.borrow_mut().push_back(kernel::SystemEvent {
+                 event_type: kernel::EventType::MouseUp,
+                 code: button as u32,
+                 x,
+                 y,
+             });
+        }
+    });
+}
+
+#[wasm_bindgen]
+pub fn on_mousemove(x: i32, y: i32) {
+    MACHINE.with(|m| {
+        if let Some(machine) = m.borrow_mut().as_mut() {
+             machine.events.borrow_mut().push_back(kernel::SystemEvent {
+                 event_type: kernel::EventType::MouseMove,
+                 code: 0,
+                 x,
+                 y,
+             });
+        }
+    });
 }

@@ -39,7 +39,7 @@
     <input type="text" id="hidden-input" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
     <script type="module">
         window.addEventListener("TrunkApplicationStarted", async (e) => {
-            const { init_os, tick, on_keydown, on_keyup, get_video_buffer_ptr } = window.wasmBindings;
+            const { init_os, tick, on_keydown, on_keyup, on_mousedown, on_mouseup, on_mousemove, get_video_buffer_ptr } = window.wasmBindings;
             const wasm = e.detail.wasm;
 
             // Initialize the OS (memory, state)
@@ -128,6 +128,34 @@
 
                 requestAnimationFrame(step);
             }
+
+            // Mouse Handling
+            canvas.addEventListener('mousemove', (e) => {
+                const rect = canvas.getBoundingClientRect();
+                const x = (e.clientX - rect.left) * (canvas.width / rect.width);
+                const y = (e.clientY - rect.top) * (canvas.height / rect.height);
+                if (window.wasmBindings.on_mousemove) {
+                    window.wasmBindings.on_mousemove(Math.floor(x), Math.floor(y));
+                }
+            });
+
+            canvas.addEventListener('mousedown', (e) => {
+                const rect = canvas.getBoundingClientRect();
+                const x = (e.clientX - rect.left) * (canvas.width / rect.width);
+                const y = (e.clientY - rect.top) * (canvas.height / rect.height);
+                if (window.wasmBindings.on_mousedown) {
+                    window.wasmBindings.on_mousedown(Math.floor(x), Math.floor(y), e.button);
+                }
+            });
+
+            canvas.addEventListener('mouseup', (e) => {
+                const rect = canvas.getBoundingClientRect();
+                const x = (e.clientX - rect.left) * (canvas.width / rect.width);
+                const y = (e.clientY - rect.top) * (canvas.height / rect.height);
+                if (window.wasmBindings.on_mouseup) {
+                    window.wasmBindings.on_mouseup(Math.floor(x), Math.floor(y), e.button);
+                }
+            });
 
             requestAnimationFrame(step);
         });
