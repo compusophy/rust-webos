@@ -259,8 +259,8 @@ impl DesktopState {
                 draw_text(menu_x + 30, menu_y + 70, "Shutdown", COLOR_BLACK);
             }
 
-            // 5. Draw Cursor
-            draw_cursor(self.cursor_x, self.cursor_y, self.mouse_down);
+            // 5. Draw Cursor (Removed as per user request)
+            // draw_cursor(self.cursor_x, self.cursor_y, self.mouse_down);
         }
     }
 }
@@ -314,62 +314,7 @@ unsafe fn draw_window(win: &Window, is_active: bool) {
     }
 }
 
-unsafe fn draw_cursor(x: i32, y: i32, down: bool) {
-    // Draw a nice arrow/pointer
-    let color_outline = COLOR_BLACK;
-    let color_fill = COLOR_WHITE;
-    
-    // Simple Arrow Bitmap (Mocked by rects for now)
-    // Tip at x,y
-    
-    // Outline
-    sys_draw_rect(x, y, 1, 14, color_outline);    // Vertical left
-    sys_draw_rect(x, y, 10, 1, color_outline);    // Top
-    sys_draw_rect(x+1, y+1, 1, 12, color_fill);   // Fill Vert
-    
-    // Diagonal
-    for i in 0..10 {
-        sys_draw_rect(x + i, y + i, 2, 11-i, color_fill); // Solid fill body (imperfect)
-        sys_draw_rect(x + i, y + i, 1, 1, color_outline); // Diagonal edge
-    }
-    
-    // Just drawing a classic shape manually
-    //      *
-    //      **
-    //      ***
-    //      ****
-    //      *****
-    //      ******
-    
-    // Revert to simple predictable shape if complex loop fails
-    
-    // Arrow Vert
-    sys_draw_rect(x, y, 2, 16, color_outline);
-    // Arrow Diag
-    // ...
-    // Let's do a Crosshair/Pointer hybrid that is easy to draw with rects
-    // White Circle with Black Outline?
-    
-    // Circle approximation (Square with cut corners)
-    // 10x10
-    let cx = x - 5;
-    let cy = y - 5;
-    
-    // Crosshair lines
-    sys_draw_rect(x - 8, y, 17, 1, color_black_alpha(128));
-    sys_draw_rect(x, y - 8, 1, 17, color_black_alpha(128));
-    
-    // White Box Pointer
-    sys_draw_rect(x, y, 10, 10, color_fill);
-    sys_draw_rect(x, y, 10, 1, color_outline);
-    sys_draw_rect(x, y, 1, 10, color_outline);
-    sys_draw_rect(x+9, y, 1, 10, color_outline);
-    sys_draw_rect(x, y+9, 10, 1, color_outline);
-}
-
-fn color_black_alpha(a: u8) -> i32 {
-    (0x00_00_00_00 | (a as u32)) as i32
-}
+// Cursor drawing removed.
 
 // Global Single State
 static mut STATE: Option<DesktopState> = None;
