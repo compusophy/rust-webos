@@ -42,7 +42,7 @@ impl Bios {
 
         match self.state {
             BiosState::PowerOn => {
-                bus.gpu.clear(0, 0, 0); // Black BIOS SCreen
+                bus.gpu.borrow_mut().clear(0, 0, 0); // Black BIOS SCreen
                 
                 if self.ticks == 10 {
                     term.reset();

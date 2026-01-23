@@ -195,29 +195,22 @@ impl Machine {
                 // Legacy Shell Input (Text Mode)
                 if !*self.gui_mode.borrow() {
                      if let Some(key) = _input_op {
-                         // Need mutable borrows
-                         let mut term = self.term.borrow_mut();
-                         let mut fs = self.fs.borrow_mut();
-                         let mut gpu = self.bus.gpu.borrow_mut();
-                         let mut gui_mode_guard = self.gui_mode.borrow_mut();
-                         let mut shell = self.shell.borrow_mut();
+                         // Need mutable borrows, but scoped to drop before reboot
+                         let should_reboot = {
+                             let mut term = self.term.borrow_mut();
+                             let mut fs = self.fs.borrow_mut();
+                             let mut gpu = self.bus.gpu.borrow_mut();
+                             let mut gui_mode_guard = self.gui_mode.borrow_mut();
+                             let mut shell = self.shell.borrow_mut();
+                             
+                             let mut events = self.events.borrow_mut();
+                             
+                             shell.on_key(&key, &mut term, &mut fs, &self.wasm, &mut gpu, &mut gui_mode_guard, &mut events, self.tick_count, self.real_fps)
+                         };
                          
-                         // Note: Shell on_key signature changes!
-                         // It needs `events` too?
-                         // If we are passing `events` Rcs to everyone, Shell should hold the Rc too?
-                         // Or pass it here?
-                         // Shell.on_key signature was: `events: &mut VecDeque`
-                         // We can borrow mutable events.
-                         
-                         let mut events = self.events.borrow_mut();
-                         
-                         let res = shell.on_key(&key, &mut term, &mut fs, &self.wasm, &mut gpu, &mut gui_mode_guard, &mut events, self.tick_count, self.real_fps);
-                         
-                         if res {
+                         if should_reboot {
                              web_sys::console::log_1(&"system rebooting...".into());
-                             self.reboot(); // This might fail due to borrows?
-                             // self.reboot replaces self. Checks out?
-                             // new() returns Self.
+                             self.reboot(); 
                          }
                      }
                 }

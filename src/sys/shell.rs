@@ -208,7 +208,7 @@ impl Shell {
         false
     }
     
-    fn run_one_command(&mut self, cmd_str: &str, term: &mut crate::term::Terminal, fs: &mut crate::sys::fs::FileSystem, wasm: &crate::sys::wasm::WasmRuntime, gpu: &mut crate::hw::gpu::Gpu, gui_mode: &mut bool, events: &mut std::collections::VecDeque<crate::kernel::SystemEvent>, ticks: u64, hz: f64) -> CmdResult {
+    fn run_one_command(&mut self, cmd_str: &str, term: &mut crate::term::Terminal, fs: &mut crate::sys::fs::FileSystem, wasm: &crate::sys::wasm::WasmRuntime, _gpu: &mut crate::hw::gpu::Gpu, _gui_mode: &mut bool, _events: &mut std::collections::VecDeque<crate::kernel::SystemEvent>, ticks: u64, hz: f64) -> CmdResult {
         if cmd_str.is_empty() {
              return CmdResult::Success;
         }
@@ -365,8 +365,6 @@ impl Shell {
                         .and_then(|d| d.children.get(path))
                         .or_else(|| {
                              // Try absolute path resolution (simple /bin/hello.wasm check)
-                             // Our fs resolution is weak, let's just try to find it in current or root/bin
-                             // Helper for absolute path needed but for now:
                              if path.starts_with("/bin/") {
                                  fs.root.children.get("bin").and_then(|b| b.children.get(&path[5..]))
                              } else {
@@ -380,8 +378,7 @@ impl Shell {
                             term.write_str(&format!("executing {}...\n", path));
                             match wasm.load(&node.content) {
                                 Ok(_) => {
-                                    // Loaded successfully. The process is now active in background.
-                                    // term.write_str("program started.\n"); 
+                                    // Loaded successfully. active_process is set.
                                     CmdResult::Success
                                 },
                                 Err(e) => {
@@ -394,8 +391,7 @@ impl Shell {
                              CmdResult::Error
                         }
                     } else {
-                        // Try resolving properly if we can or just hack it for "hello.wasm"
-                        // If user is in /bin, and types exec hello.wasm
+                        // Fallback: Try resolving properly if we can or just hack it for "hello.wasm"
                          let dir = fs.resolve_dir(&fs.current_path).unwrap_or(&fs.root);
                          if let Some(node) = dir.children.get(path) {
                                if let crate::sys::fs::NodeType::File = node.node_type {
@@ -413,7 +409,6 @@ impl Shell {
                          } else {
                              term.write_str("file not found\n");
                              CmdResult::Error
-                         }
                          }
                     }
                 }

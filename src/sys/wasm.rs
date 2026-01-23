@@ -105,8 +105,18 @@ impl WasmRuntime {
         }).unwrap();
 
         linker.func_wrap("env", "sys_poll_event", |mut caller: Caller<WasmContext>, ptr: i32| -> i32 {
-             let mut events_guard = caller.data().events.borrow_mut();
+             // Clone Rc to avoid holding borrow on caller
+             let events_rc = caller.data().events.clone();
+             let mut events_guard = events_rc.borrow_mut();
+             
              if let Some(event) = events_guard.pop_front() {
+                 // Drop guard to release RefCell borrow? No, we need event data.
+                 // But we DO need to release caller borrow if we access caller data?
+                 // No, extern_mem needs &mut caller.
+                 // events_rc is independent of caller (it's a clone of the Rc).
+                 // So we can hold events_guard (RefMut) while passing &mut caller execution ctx?
+                 // Yes, because events_rc is a local variable, not borrowing caller.
+                 
                  if let Some(extern_mem) = caller.get_export("memory").and_then(|e| e.into_memory()) {
                      let type_val = event.event_type as u32;
                      let code_val = event.code;
