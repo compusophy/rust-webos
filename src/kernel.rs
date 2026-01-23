@@ -49,6 +49,7 @@ pub struct Machine {
     pub last_sec_time: f64,
     pub state: MachineState,
     pub gui_mode: Rc<RefCell<bool>>,
+    pub should_reset: Rc<RefCell<bool>>,
     
     // Input
     pub events: Rc<RefCell<VecDeque<SystemEvent>>>,
@@ -71,6 +72,7 @@ impl Machine {
         // Shared State
         let gui_mode = Rc::new(RefCell::new(false));
          let events = Rc::new(RefCell::new(VecDeque::new()));
+         let should_reset = Rc::new(RefCell::new(false));
 
         // Wasm Runtime needs access to these Rcs
         let wasm = sys::wasm::WasmRuntime::new(
@@ -78,7 +80,8 @@ impl Machine {
             gpu.clone(),
             gui_mode.clone(),
             events.clone(),
-            fs.clone() // Need FS for list_dir etc
+            fs.clone(),
+            should_reset.clone()
         );
         
         let now = web_sys::window().unwrap().performance().unwrap().now();
@@ -99,6 +102,7 @@ impl Machine {
             state: MachineState::Bios,
             bios,
             gui_mode,
+            should_reset,
             events,
         }
     }
@@ -144,6 +148,12 @@ impl Machine {
                 }
             },
             MachineState::Kernel => {
+                 // Check Shared Reset Flag (From WASM)
+                 if *self.should_reset.borrow() {
+                     self.reboot();
+                     return;
+                 }
+                 
                 // Process Input (Interrupts) - NOW handled by Machine.events + Shell on_key?
                 // `step` received `input_op` (legacy from lib.rs InputQueue).
                 // We should stop using input_op and look at `events`.

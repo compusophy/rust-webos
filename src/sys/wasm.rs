@@ -10,6 +10,7 @@ pub struct WasmRuntime {
     gui_mode: Rc<RefCell<bool>>,
     events: Rc<RefCell<VecDeque<crate::kernel::SystemEvent>>>,
     fs: Rc<RefCell<crate::sys::fs::FileSystem>>,
+    should_reset: Rc<RefCell<bool>>,
     
     active_process: RefCell<Option<ActiveProcess>>,
 }
@@ -30,8 +31,8 @@ pub struct WasmContext {
     pub gpu: Rc<RefCell<crate::hw::gpu::Gpu>>,
     pub gui_mode: Rc<RefCell<bool>>,
     pub events: Rc<RefCell<VecDeque<crate::kernel::SystemEvent>>>,
-    #[allow(dead_code)]
     pub fs: Rc<RefCell<crate::sys::fs::FileSystem>>,
+    pub should_reset: Rc<RefCell<bool>>,
 }
 
 impl WasmRuntime {
@@ -41,6 +42,7 @@ impl WasmRuntime {
         gui_mode: Rc<RefCell<bool>>,
         events: Rc<RefCell<VecDeque<crate::kernel::SystemEvent>>>,
         fs: Rc<RefCell<crate::sys::fs::FileSystem>>,
+        should_reset: Rc<RefCell<bool>>,
     ) -> Self {
         let engine = Engine::default();
         Self {
@@ -50,6 +52,7 @@ impl WasmRuntime {
             gui_mode,
             events,
             fs,
+            should_reset,
             active_process: RefCell::new(None),
         }
     }
@@ -64,6 +67,7 @@ impl WasmRuntime {
             gui_mode: self.gui_mode.clone(),
             events: self.events.clone(),
             fs: self.fs.clone(),
+            should_reset: self.should_reset.clone(),
         };
 
         let mut store = Store::new(&self.engine, ctx);
@@ -83,6 +87,17 @@ impl WasmRuntime {
                     }
                 }
             }
+        }).unwrap();
+
+        linker.func_wrap("env", "sys_reset", |caller: Caller<WasmContext>| {
+            // Wipe Data
+             if let Some(window) = web_sys::window() {
+                if let Ok(Some(storage)) = window.local_storage() {
+                    let _ = storage.remove_item("wasmix_fs_local");
+                }
+            }
+            // Trigger Reboot
+            *caller.data().should_reset.borrow_mut() = true;
         }).unwrap();
 
         linker.func_wrap("env", "sys_gpu_width", |caller: Caller<WasmContext>| -> i32 {
