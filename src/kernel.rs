@@ -199,12 +199,12 @@ impl Machine {
                          let should_reboot = {
                              let mut term = self.term.borrow_mut();
                              let mut fs = self.fs.borrow_mut();
-                             let mut gpu = self.bus.gpu.borrow_mut();
+                             // let mut gpu = self.bus.gpu.borrow_mut(); // Removed to avoid RefCell panic
                              let mut shell = self.shell.borrow_mut();
                              
                              let mut events = self.events.borrow_mut();
                              
-                             shell.on_key(&key, &mut term, &mut fs, &self.wasm, &mut gpu, &mut events, self.tick_count, self.real_fps)
+                             shell.on_key(&key, &mut term, &mut fs, &self.wasm, &mut events, self.tick_count, self.real_fps)
                          };
                          
                          if should_reboot {
