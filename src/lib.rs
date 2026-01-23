@@ -110,7 +110,8 @@ pub fn get_video_buffer_ptr() -> *const u8 {
 #[wasm_bindgen]
 pub fn on_keydown(key: String, _ctrl: bool, _alt: bool, _meta: bool) {
     MACHINE.with(|m| {
-        if let Some(machine) = m.borrow_mut().as_mut() {
+        if let Ok(mut borrow) = m.try_borrow_mut() {
+            if let Some(machine) = borrow.as_mut() {
              machine.events.borrow_mut().push_back(kernel::SystemEvent {
                  event_type: kernel::EventType::KeyDown,
                  code: 0, // TODO: Map keys
@@ -131,7 +132,8 @@ pub fn on_keydown(key: String, _ctrl: bool, _alt: bool, _meta: bool) {
 #[wasm_bindgen]
 pub fn on_keyup(_key: String) {
     MACHINE.with(|m| {
-        if let Some(machine) = m.borrow_mut().as_mut() {
+        if let Ok(mut borrow) = m.try_borrow_mut() {
+            if let Some(machine) = borrow.as_mut() {
              machine.events.borrow_mut().push_back(kernel::SystemEvent {
                  event_type: kernel::EventType::KeyUp,
                  code: 0, 
@@ -145,7 +147,8 @@ pub fn on_keyup(_key: String) {
 #[wasm_bindgen]
 pub fn on_mousedown(x: i32, y: i32, button: i32) {
     MACHINE.with(|m| {
-        if let Some(machine) = m.borrow_mut().as_mut() {
+        if let Ok(mut borrow) = m.try_borrow_mut() {
+            if let Some(machine) = borrow.as_mut() {
              machine.events.borrow_mut().push_back(kernel::SystemEvent {
                  event_type: kernel::EventType::MouseDown,
                  code: button as u32,
@@ -159,7 +162,8 @@ pub fn on_mousedown(x: i32, y: i32, button: i32) {
 #[wasm_bindgen]
 pub fn on_mouseup(x: i32, y: i32, button: i32) {
     MACHINE.with(|m| {
-        if let Some(machine) = m.borrow_mut().as_mut() {
+        if let Ok(mut borrow) = m.try_borrow_mut() {
+            if let Some(machine) = borrow.as_mut() {
              machine.events.borrow_mut().push_back(kernel::SystemEvent {
                  event_type: kernel::EventType::MouseUp,
                  code: button as u32,
@@ -173,7 +177,8 @@ pub fn on_mouseup(x: i32, y: i32, button: i32) {
 #[wasm_bindgen]
 pub fn on_mousemove(x: i32, y: i32) {
     MACHINE.with(|m| {
-        if let Some(machine) = m.borrow_mut().as_mut() {
+        if let Ok(mut borrow) = m.try_borrow_mut() {
+            if let Some(machine) = borrow.as_mut() {
              machine.events.borrow_mut().push_back(kernel::SystemEvent {
                  event_type: kernel::EventType::MouseMove,
                  code: 0,

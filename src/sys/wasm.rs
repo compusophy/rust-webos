@@ -30,6 +30,7 @@ pub struct WasmContext {
     pub gpu: Rc<RefCell<crate::hw::gpu::Gpu>>,
     pub gui_mode: Rc<RefCell<bool>>,
     pub events: Rc<RefCell<VecDeque<crate::kernel::SystemEvent>>>,
+    #[allow(dead_code)]
     pub fs: Rc<RefCell<crate::sys::fs::FileSystem>>,
 }
 
@@ -92,15 +93,15 @@ impl WasmRuntime {
             caller.data().gpu.borrow().height as i32
         }).unwrap();
 
-        linker.func_wrap("env", "sys_gpu_clear", |mut caller: Caller<WasmContext>, r: i32, g: i32, b: i32| {
+        linker.func_wrap("env", "sys_gpu_clear", |caller: Caller<WasmContext>, r: i32, g: i32, b: i32| {
             caller.data().gpu.borrow_mut().clear(r as u8, g as u8, b as u8);
         }).unwrap();
 
-        linker.func_wrap("env", "sys_draw_rect", |mut caller: Caller<WasmContext>, x: i32, y: i32, w: i32, h: i32, color: i32| {
+        linker.func_wrap("env", "sys_draw_rect", |caller: Caller<WasmContext>, x: i32, y: i32, w: i32, h: i32, color: i32| {
              caller.data().gpu.borrow_mut().fill_rect(x as u32, y as u32, w as u32, h as u32, color as u32);
         }).unwrap();
 
-        linker.func_wrap("env", "sys_enable_gui_mode", |mut caller: Caller<WasmContext>| {
+        linker.func_wrap("env", "sys_enable_gui_mode", |caller: Caller<WasmContext>| {
             *caller.data().gui_mode.borrow_mut() = true;
         }).unwrap();
 

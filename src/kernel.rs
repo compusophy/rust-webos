@@ -151,7 +151,7 @@ impl Machine {
                 // Let's pop from events if it's a KeyDown? Use `events` directly?
                 // Shell needs to consume events.
                 
-                let mut events_guard = self.events.borrow_mut();
+                let events_guard = self.events.borrow_mut();
                 if let Some(event) = events_guard.front().cloned() {
                     // Check if it is a key event to pass to shell?
                     // Or does shell process the queue? 
