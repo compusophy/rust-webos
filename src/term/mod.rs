@@ -125,11 +125,20 @@ impl Terminal {
         self.default_fg = color;
     }
 
+    pub fn set_bg_color(&mut self, color: u32) {
+        self.default_bg = color;
+    }
+
     pub fn render(&self, ctx: &mut Context, offset_x: u32, offset_y: u32) {
         // We assume 8x16 font for now
         // TODO: Import font constants
         let char_w = 8;
         let char_h = 16;
+        
+        // Fill the left padding (offset) with default background to prevent artifacts
+        if offset_x > 0 {
+             ctx.fill_rect(0, 0, offset_x, (self.rows * char_h) as u32, self.default_bg);
+        }
         
         for y in 0..self.rows {
             for x in 0..self.cols {

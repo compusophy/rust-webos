@@ -1,13 +1,15 @@
 use std::collections::HashMap;
+use serde::{Serialize, Deserialize};
+use wasm_bindgen::prelude::*;
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 #[allow(dead_code)]
 pub enum NodeType {
     File,
     Directory,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 #[allow(dead_code)]
 pub struct Node {
     pub name: String,
@@ -56,22 +58,44 @@ impl FileSystem {
             used_space: 0,
         };
         // Initialize standard directories
-        fs.mkdir("local").unwrap();
-        fs.mkdir("tmp").unwrap();
+        fs.mkdir_internal("local").unwrap();
+        fs.mkdir_internal("tmp").unwrap();
+        
+        // Load persistent storage for "local"
+        fs.load_local_disk();
+        
         fs
     }
 
-    // Navigate to a node, returning mutable reference if possible?
-    // Rust ownership makes mutable tree traversal hard with references.
-    // For this simple OS, we can implement path resolution logic that traverses and returns clones or just modifies via full path.
-    // Let's implement operation methods directly on FS.
+    // Helper to get window.localStorage
+    fn get_storage() -> Option<web_sys::Storage> {
+        let window = web_sys::window()?;
+        window.local_storage().ok().flatten()
+    }
+    
+    fn save_local_disk(&self) {
+        if let Some(storage) = Self::get_storage() {
+            if let Some(local_node) = self.root.children.get("local") {
+                if let Ok(json) = serde_json::to_string(local_node) {
+                    let _ = storage.set_item("wasmix_fs_local", &json);
+                }
+            }
+        }
+    }
 
-    pub fn mkdir(&mut self, path: &str) -> Result<(), String> {
-        // Simplified: support only relative path in current dir for now
-        // or absolute path.
-        // Let's assume relative to current_path for MVP.
-        
-        if self.used_space + 4096 > self.total_space { // Arbitrary cost for dir
+    fn load_local_disk(&mut self) {
+        if let Some(storage) = Self::get_storage() {
+             if let Ok(Some(json)) = storage.get_item("wasmix_fs_local") {
+                 if let Ok(node) = serde_json::from_str::<Node>(&json) {
+                     self.root.children.insert("local".to_string(), node);
+                 }
+             }
+        }
+    }
+
+    // Internal mkdir without saving (used during init)
+    fn mkdir_internal(&mut self, path: &str) -> Result<(), String> {
+        if self.used_space + 4096 > self.total_space { 
             return Err("Disk full".to_string());
         }
 
@@ -86,6 +110,22 @@ impl FileSystem {
         Ok(())
     }
 
+    pub fn mkdir(&mut self, path: &str) -> Result<(), String> {
+        let res = self.mkdir_internal(path);
+        if res.is_ok() {
+            // If we are in /local or root creating local (handled by internal but general check)
+            // Simplest check: check if modified path affects local
+            // Ideally we check if absolute path starts with /local
+            // But strict path checking is complex here.
+            // Let's just save all the time for MVP safety or check if current path is empty (root) and target is local? No user won't create local.
+            // Check if we are inside local
+            if self.is_inside_local() {
+                self.save_local_disk();
+            }
+        }
+        res
+    }
+
     pub fn create_file(&mut self, path: &str) -> Result<(), String> {
         if self.used_space + 10 > self.total_space { 
             return Err("Disk full".to_string());
@@ -98,8 +138,21 @@ impl FileSystem {
         }
 
         target_dir.children.insert(path.to_string(), Node::new_file(path, Vec::new()));
-        self.used_space += 10; // Metadata overhead
+        self.used_space += 10; 
+        
+        if self.is_inside_local() {
+            self.save_local_disk();
+        }
+        
         Ok(())
+    }
+    
+    fn is_inside_local(&self) -> bool {
+        // If current path starts with "local"
+        if !self.current_path.is_empty() && self.current_path[0] == "local" {
+            return true;
+        }
+        false
     }
 
     pub fn cd(&mut self, path: &str) -> Result<(), String> {

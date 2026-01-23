@@ -2,6 +2,9 @@ pub struct Shell {
     input_buffer: String,
     // prompt: String, // Removed, we build it dynamically
     current_path: String,
+    history: Vec<String>,
+    history_index: Option<usize>,
+    waiting_for_reset: bool,
 }
 
 struct CommandDef {
@@ -22,6 +25,7 @@ const COMMANDS: &[CommandDef] = &[
     CommandDef { name: "uptime", desc: "System uptime" },
     CommandDef { name: "date", desc: "Real World Time" },
     CommandDef { name: "monitor", desc: "Real System Monitor" },
+    CommandDef { name: "reset", desc: "Factory Reset (Wipe Data)" },
 ];
 
 impl Shell {
@@ -29,6 +33,9 @@ impl Shell {
         Self {
             input_buffer: String::new(),
             current_path: "~".to_string(),
+            history: Vec::new(),
+            history_index: None,
+            waiting_for_reset: false,
         }
     }
 
@@ -78,8 +85,51 @@ impl Shell {
     }
 
     pub fn on_key(&mut self, key: &str, term: &mut crate::term::Terminal, fs: &mut crate::sys::fs::FileSystem, ticks: u64, hz: f64) -> bool {
+        // Handle confirmation dialog
+        if self.waiting_for_reset {
+            if key == "Enter" {
+                term.write_char('\n');
+                let input = self.input_buffer.trim();
+                if input == "y" || input == "Y" {
+                    term.write_str("Resetting to Factory Defaults...\n");
+                    
+                    // Clear LocalStorage
+                    if let Some(window) = web_sys::window() {
+                        if let Ok(Some(storage)) = window.local_storage() {
+                            let _ = storage.remove_item("wasmix_fs_local");
+                        }
+                    }
+
+                    self.input_buffer.clear();
+                    self.waiting_for_reset = false;
+                    return true; // Trigger REBOOT
+                } else {
+                    term.write_str("Reset cancelled.\n");
+                    self.input_buffer.clear();
+                    self.waiting_for_reset = false;
+                    self.draw_prompt(term);
+                    return false;
+                }
+            } else if key == "Backspace" {
+                 if !self.input_buffer.is_empty() {
+                    self.input_buffer.pop();
+                    term.write_char('\x08'); 
+                }
+                return false;
+            } else if key.len() == 1 {
+                self.input_buffer.push_str(key);
+                term.write_str(key);
+                return false;
+            }
+            return false;
+        }
+
         if key == "Enter" {
             term.write_char('\n');
+            if !self.input_buffer.trim().is_empty() {
+                self.history.push(self.input_buffer.clone());
+                self.history_index = None;
+            }
             let reboot = self.execute_command(term, fs, ticks, hz);
             self.input_buffer.clear();
             self.draw_prompt(term);
@@ -88,6 +138,39 @@ impl Shell {
             if !self.input_buffer.is_empty() {
                 self.input_buffer.pop();
                 term.write_char('\x08'); 
+            }
+        } else if key == "ArrowUp" {
+            if !self.history.is_empty() {
+                let new_index = match self.history_index {
+                    Some(i) => if i > 0 { i - 1 } else { 0 },
+                    None => self.history.len() - 1,
+                };
+                self.history_index = Some(new_index);
+
+                // Clear current line
+                for _ in 0..self.input_buffer.len() {
+                    term.write_char('\x08');
+                }
+                
+                self.input_buffer = self.history[new_index].clone();
+                term.write_str(&self.input_buffer);
+            }
+        } else if key == "ArrowDown" {
+            if let Some(i) = self.history_index {
+                // Clear current line
+                for _ in 0..self.input_buffer.len() {
+                    term.write_char('\x08');
+                }
+
+                if i < self.history.len() - 1 {
+                    let new_index = i + 1;
+                    self.history_index = Some(new_index);
+                    self.input_buffer = self.history[new_index].clone();
+                } else {
+                    self.history_index = None;
+                    self.input_buffer.clear();
+                }
+                term.write_str(&self.input_buffer);
             }
         } else if key.len() == 1 {
             self.input_buffer.push_str(key);
@@ -209,6 +292,12 @@ impl Shell {
                 term.write_str("VRAM: 512x512 RGBA (1 MB)\n");
                 let msg_ticks = format!("Tick Count: {}\n", ticks);
                 term.write_str(&msg_ticks);
+            },
+            "reset" => {
+                term.write_str("WARNING: This will wipe all local data.\n");
+                term.write_str("Are you sure? (y/n) ");
+                self.input_buffer.clear();
+                self.waiting_for_reset = true;
             },
             _ => {
                 term.write_str("Unknown command: ");

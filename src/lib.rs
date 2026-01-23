@@ -149,6 +149,7 @@ fn cpu_step(machine: &mut Machine) {
                 machine.state = MachineState::Kernel;
                 
                 // Clear BIOS Screen
+                machine.term.set_bg_color(0x00_00_00_FF); // Reset to Black for Kernel
                 machine.term.reset();
                 machine.term.show_cursor(true); // Enable cursor for shell
                 machine.bus.gpu.clear(0, 0, 0); // Clear to Black
@@ -163,10 +164,37 @@ fn cpu_step(machine: &mut Machine) {
             if let Some(key) = input_op {
                  let res = machine.shell.on_key(&key, &mut machine.term, &mut machine.fs, machine.tick_count, machine.real_fps);
                  if res {
-                     // Soft Reboot
-                     machine.bios = bios::Bios::new();
-                     machine.state = MachineState::Bios;
-                     machine.tick_count = 0;
+                     // Hard Reboot - Re-initialize everything
+                     web_sys::console::log_1(&"System Rebooting...".into());
+                     
+                     // Hardware Init
+                     let ram = hw::ram::Ram::new(16 * 1024 * 1024); 
+                     let gpu = hw::gpu::Gpu::new(512, 512); 
+                     let bus = hw::bus::Bus::new(ram, gpu);
+                     let cpu = hw::cpu::Cpu::new();
+                     let bios = bios::Bios::new();
+                     
+                     let term = term::Terminal::new(64, 32);
+                     let shell = sys::shell::Shell::new();
+                     let fs = sys::fs::FileSystem::new(10); 
+                     
+                     let new_machine = Machine {
+                         cpu,
+                         bus,
+                         term,
+                         shell,
+                         fs,
+                         tick_count: 0,
+                         last_time:  web_sys::window().unwrap().performance().unwrap().now(),
+                         accumulator: 0.0,
+                         real_fps: 0.0,
+                         frames_buffer: 0,
+                         last_sec_time: web_sys::window().unwrap().performance().unwrap().now(),
+                         state: MachineState::Bios,
+                         bios,
+                     };
+
+                     *machine = new_machine;
                  }
             }
             machine.bus.gpu.clear(0, 0, 0); // Black background

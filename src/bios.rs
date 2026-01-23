@@ -27,7 +27,7 @@ impl Bios {
 
         match self.state {
             BiosState::PowerOn => {
-                bus.gpu.clear(0, 0, 50); // Blue BIOS SCreen
+                bus.gpu.clear(0, 0, 0); // Black BIOS SCreen
                 
                 if self.ticks == 10 {
                     term.reset();
@@ -56,10 +56,10 @@ impl Bios {
                 }
             },
             BiosState::Booting => {
-                if self.ticks > 150 {
-                     term.write_str("\nSystem OK.\nBooting from Hard Disk...\n");
+                 // Skip text, just wait a brief moment then done
+                 if self.ticks > 120 {
                      self.state = BiosState::Done;
-                }
+                 }
             },
             BiosState::Done => {
                 return true;
