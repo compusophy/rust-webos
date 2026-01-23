@@ -101,6 +101,23 @@ impl WasmRuntime {
              caller.data().gpu.borrow_mut().fill_rect(x as u32, y as u32, w as u32, h as u32, color as u32);
         }).unwrap();
 
+        linker.func_wrap("env", "sys_draw_text", |caller: Caller<WasmContext>, ptr: i32, len: i32, x: i32, y: i32, color: i32| {
+            if let Some(extern_mem) = caller.get_export("memory").and_then(|e| e.into_memory()) {
+                let mut buffer = vec![0u8; len as usize];
+                if extern_mem.read(&caller, ptr as usize, &mut buffer).is_ok() {
+                    if let Ok(msg) = String::from_utf8(buffer) {
+                        let mut gpu = caller.data().gpu.borrow_mut();
+                        let mut draw_x = x as u32;
+                        let draw_y = y as u32;
+                        for c in msg.chars() {
+                             crate::gfx::font::draw_char(&mut gpu, draw_x, draw_y, c, color as u32);
+                             draw_x += 8; // Advance cursor (assume 8px width)
+                        }
+                    }
+                }
+            }
+        }).unwrap();
+
         linker.func_wrap("env", "sys_enable_gui_mode", |caller: Caller<WasmContext>| {
             *caller.data().gui_mode.borrow_mut() = true;
         }).unwrap();

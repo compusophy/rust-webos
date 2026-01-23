@@ -7,12 +7,16 @@ extern "C" {
     fn sys_gpu_height() -> i32;
     fn sys_gpu_clear(r: i32, g: i32, b: i32);
     fn sys_draw_rect(x: i32, y: i32, w: i32, h: i32, color: i32);
+    fn sys_draw_text(ptr: *const u8, len: usize, x: i32, y: i32, color: i32);
     fn sys_enable_gui_mode();
     fn sys_poll_event(ptr: *mut u8) -> i32;
 }
 
-// ... Structs (SystemEvent, Window, DesktopState) same as before ... 
-// Copied from previous logic
+fn draw_text(x: i32, y: i32, text: &str, color: i32) {
+    unsafe {
+        sys_draw_text(text.as_ptr(), text.len(), x, y, color);
+    }
+}
 
 #[repr(C, packed)]
 struct SystemEvent {
@@ -28,6 +32,7 @@ const COLOR_GRAY: i32 = 0xCC_CC_CC_FFu32 as i32;
 const COLOR_DARK_GRAY: i32 = 0x80_80_80_FFu32 as i32;
 const COLOR_BLUE: i32 = 0x00_00_80_FFu32 as i32;
 const COLOR_BLACK: i32 = 0x00_00_00_FFu32 as i32;
+const COLOR_NAVY: i32 = 0x00_00_40_FFu32 as i32;
 
 struct Window {
     x: i32,
@@ -35,6 +40,7 @@ struct Window {
     w: i32,
     h: i32,
     title: String,
+    content_type: String, // "file_manager", "terminal", "generic"
     is_dragging: bool,
     drag_offset_x: i32,
     drag_offset_y: i32,
@@ -47,7 +53,8 @@ struct DesktopState {
     cursor_x: i32,
     cursor_y: i32,
     mouse_down: bool,
-    initialized: bool,
+    start_menu_open: bool,
+    active_window_idx: Option<usize>,
 }
 
 impl DesktopState {
@@ -59,12 +66,14 @@ impl DesktopState {
         windows.push(Window {
             x: 50, y: 50, w: 300, h: 200,
             title: "File Manager".to_string(),
+            content_type: "file_manager".to_string(),
             is_dragging: false, drag_offset_x: 0, drag_offset_y: 0,
         });
 
         windows.push(Window {
-            x: 100, y: 100, w: 300, h: 200,
+            x: 100, y: 150, w: 300, h: 200,
             title: "Terminal".to_string(),
+            content_type: "terminal".to_string(),
             is_dragging: false, drag_offset_x: 0, drag_offset_y: 0,
         });
 
@@ -75,25 +84,61 @@ impl DesktopState {
             cursor_x: width / 2,
             cursor_y: height / 2,
             mouse_down: false,
-            initialized: false, 
+            start_menu_open: false,
+            active_window_idx: Some(1), // Terminal on top by default
         }
     }
     
-    // ... update() and draw() same as before ...
      fn update(&mut self, event: SystemEvent) {
         match event.event_type {
             3 => { // MouseDown
                 self.mouse_down = true;
-                // Check collisions (reverse order for z-index)
-                for win in self.windows.iter_mut().rev() {
-                    // Title Bar Hit Test
-                    if self.cursor_x >= win.x && self.cursor_x <= win.x + win.w &&
-                       self.cursor_y >= win.y && self.cursor_y <= win.y + 25 {
-                        win.is_dragging = true;
-                        win.drag_offset_x = self.cursor_x - win.x;
-                        win.drag_offset_y = self.cursor_y - win.y;
-                        break; // Only pick one
+                
+                // Handle Start Menu Click
+                let taskbar_y = self.height - 40;
+                if self.cursor_y >= taskbar_y {
+                    if self.cursor_x >= 2 && self.cursor_x <= 62 {
+                        self.start_menu_open = !self.start_menu_open;
+                        return;
                     }
+                } else {
+                    if self.start_menu_open {
+                        // Click outside closes menu
+                        self.start_menu_open = false;
+                    }
+                }
+
+                // Check collisions (reverse order for z-index)
+                let mut clicked_idx = None;
+                for (i, win) in self.windows.iter_mut().enumerate().rev() {
+                    // Window Hit Test (Title Bar + Body)
+                    if self.cursor_x >= win.x && self.cursor_x <= win.x + win.w &&
+                       self.cursor_y >= win.y && self.cursor_y <= win.y + win.h {
+                        
+                        // Bring to front logic will be handled by reordering vector logic later
+                        // For now just mark active
+                        clicked_idx = Some(i);
+
+                        // Title Bar Drag Test
+                        if self.cursor_y <= win.y + 25 {
+                            win.is_dragging = true;
+                            win.drag_offset_x = self.cursor_x - win.x;
+                            win.drag_offset_y = self.cursor_y - win.y;
+                        }
+                        break; 
+                    }
+                }
+                
+                if let Some(idx) = clicked_idx {
+                    self.active_window_idx = Some(idx);
+                    // Move to end of vec to render on top?
+                    // Rust borrow checker makes this annoying in a single pass.
+                    // Doing naive reorder:
+                    let win = self.windows.remove(idx);
+                    self.windows.push(win);
+                    self.active_window_idx = Some(self.windows.len() - 1);
+                } else {
+                    self.active_window_idx = None;
                 }
             },
             4 => { // MouseUp
@@ -127,40 +172,170 @@ impl DesktopState {
 
             // 2. Draw Taskbar
             let taskbar_height = 40;
-            sys_draw_rect(0, self.height - taskbar_height, self.width, taskbar_height, COLOR_GRAY);
+            let tb_y = self.height - taskbar_height;
+            sys_draw_rect(0, tb_y, self.width, taskbar_height, COLOR_GRAY);
+            sys_draw_rect(0, tb_y, self.width, 2, COLOR_WHITE);
             
             // Start Button
-            sys_draw_rect(2, self.height - taskbar_height + 2, 60, taskbar_height - 4, COLOR_GRAY);
-            sys_draw_rect(2, self.height - taskbar_height + 2, 60, 2, COLOR_WHITE);
-            sys_draw_rect(2, self.height - taskbar_height + 2, 2, taskbar_height - 4, COLOR_WHITE);
-            sys_draw_rect(60, self.height - taskbar_height + 2, 2, taskbar_height - 4, COLOR_DARK_GRAY);
-            sys_draw_rect(2, self.height - 2, 60, 2, COLOR_DARK_GRAY);
+            let btn_x = 2;
+            let btn_y = tb_y + 4;
+            let btn_w = 60;
+            let btn_h = 32;
+            
+            // Pressed state if menu open
+            if self.start_menu_open {
+                 sys_draw_rect(btn_x, btn_y, btn_w, btn_h, COLOR_WHITE); 
+                 sys_draw_rect(btn_x+1, btn_y+1, btn_w-2, btn_h-2, COLOR_GRAY);
+                 sys_draw_rect(btn_x+2, btn_y+2, btn_w-4, btn_h-4, COLOR_DARK_GRAY); // Shadow inside
+            } else {
+                 sys_draw_rect(btn_x, btn_y, btn_w, btn_h, COLOR_WHITE); // Bevel Light
+                 sys_draw_rect(btn_x+1, btn_y+1, btn_w-2, btn_h-2, COLOR_DARK_GRAY); // Bevel Shadow
+                 sys_draw_rect(btn_x+1, btn_y+1, btn_w-3, btn_h-3, COLOR_GRAY); // Face
+            }
+            draw_text(btn_x + 10, btn_y + 8, "Start", COLOR_BLACK);
+
+            // Time (Mock)
+            draw_text(self.width - 60, tb_y + 12, "12:00 PM", COLOR_BLACK);
 
             // 3. Draw Windows
-            for win in &self.windows {
-                draw_window(win);
+            for (i, win) in self.windows.iter().enumerate() {
+                let is_active = self.active_window_idx == Some(i);
+                draw_window(win, is_active);
             }
             
-            // 4. Draw Cursor
+            // 4. Draw Start Menu if open
+            if self.start_menu_open {
+                let menu_w = 150;
+                let menu_h = 200;
+                let menu_x = 2;
+                let menu_y = tb_y - menu_h;
+                
+                sys_draw_rect(menu_x, menu_y, menu_w, menu_h, COLOR_GRAY);
+                sys_draw_rect(menu_x, menu_y, menu_w, 2, COLOR_WHITE);
+                sys_draw_rect(menu_x, menu_y, 2, menu_h, COLOR_WHITE);
+                sys_draw_rect(menu_x + menu_w - 2, menu_y, 2, menu_h, COLOR_DARK_GRAY);
+                sys_draw_rect(menu_x, menu_y + menu_h - 2, menu_w, 2, COLOR_DARK_GRAY);
+                
+                // Blue sidebar
+                sys_draw_rect(menu_x + 3, menu_y + 3, 20, menu_h - 6, COLOR_NAVY);
+                // "OS" text vertical? No, simple items.
+                
+                draw_text(menu_x + 30, menu_y + 10, "Programs", COLOR_BLACK);
+                draw_text(menu_x + 30, menu_y + 30, "Documents", COLOR_BLACK);
+                draw_text(menu_x + 30, menu_y + 50, "Settings", COLOR_BLACK);
+                draw_text(menu_x + 30, menu_y + 70, "Shutdown", COLOR_BLACK);
+            }
+
+            // 5. Draw Cursor
             draw_cursor(self.cursor_x, self.cursor_y, self.mouse_down);
         }
     }
 }
 
-unsafe fn draw_window(win: &Window) {
+unsafe fn draw_window(win: &Window, is_active: bool) {
+    // Shadow
     sys_draw_rect(win.x + 5, win.y + 5, win.w, win.h, 0x00_00_00_80); 
-    sys_draw_rect(win.x, win.y, win.w, win.h, COLOR_GRAY);
-    let title_color = if win.is_dragging { COLOR_BLUE } else { 0x00_00_40_FFu32 as i32 };
-    sys_draw_rect(win.x + 3, win.y + 3, win.w - 6, 20, title_color);
-    sys_draw_rect(win.x + 3, win.y + 26, win.w - 6, win.h - 30, COLOR_WHITE);
+    
+    // Border/Face
+    sys_draw_rect(win.x, win.y, win.w, win.h, COLOR_GRAY); // Face
+    sys_draw_rect(win.x, win.y, win.w, 1, COLOR_WHITE); // Top Light
+    sys_draw_rect(win.x, win.y, 1, win.h, COLOR_WHITE); // Left Light
+    sys_draw_rect(win.x + win.w - 1, win.y, 1, win.h, COLOR_DARK_GRAY); // Right Shadow
+    sys_draw_rect(win.x, win.y + win.h - 1, win.w, 1, COLOR_DARK_GRAY); // Bottom Shadow
+
+    // Title Bar
+    let title_color = if is_active { COLOR_NAVY } else { COLOR_DARK_GRAY };
+    sys_draw_rect(win.x + 3, win.y + 3, win.w - 6, 18, title_color);
+    
+    // Title Text
+    draw_text(win.x + 6, win.y + 6, &win.title, COLOR_WHITE);
+    
+    // Close Button (Mock)
+    sys_draw_rect(win.x + win.w - 20, win.y + 5, 14, 14, COLOR_GRAY);
+    sys_draw_rect(win.x + win.w - 19, win.y + 6, 12, 12, COLOR_GRAY); // Bevel
+    draw_text(win.x + win.w - 16, win.y + 6, "x", COLOR_BLACK);
+
+    // Content Area
+    let content_x = win.x + 4;
+    let content_y = win.y + 24;
+    let content_w = win.w - 8;
+    let content_h = win.h - 28;
+    sys_draw_rect(content_x, content_y, content_w, content_h, COLOR_WHITE);
+    
+    // Draw Context
+    match win.content_type.as_str() {
+        "file_manager" => {
+             // Mock Files
+             draw_text(content_x + 10, content_y + 10, "[DIR] bin", COLOR_BLACK);
+             draw_text(content_x + 10, content_y + 30, "[DIR] usr", COLOR_BLACK);
+             draw_text(content_x + 10, content_y + 50, "[DIR] home", COLOR_BLACK);
+             draw_text(content_x + 10, content_y + 70, "README.md", COLOR_BLACK);
+        },
+        "terminal" => {
+             sys_draw_rect(content_x, content_y, content_w, content_h, COLOR_BLACK);
+             draw_text(content_x + 5, content_y + 5, "user@wasmix:~ $ ls", COLOR_WHITE);
+             draw_text(content_x + 5, content_y + 25, "bin usr home README.md", COLOR_WHITE);
+             draw_text(content_x + 5, content_y + 45, "user@wasmix:~ $ _", COLOR_WHITE);
+        },
+        _ => {}
+    }
 }
 
 unsafe fn draw_cursor(x: i32, y: i32, down: bool) {
-    let color = if down { COLOR_BLACK } else { COLOR_WHITE };
-    sys_draw_rect(x, y, 2, 12, color);
-    sys_draw_rect(x, y, 8, 2, color);
-    sys_draw_rect(x+1, y+1, 2, 8, color);
-    sys_draw_rect(x+1, y+1, 6, 2, color);
+    // Draw a nice arrow/pointer
+    let color_outline = COLOR_BLACK;
+    let color_fill = COLOR_WHITE;
+    
+    // Simple Arrow Bitmap (Mocked by rects for now)
+    // Tip at x,y
+    
+    // Outline
+    sys_draw_rect(x, y, 1, 14, color_outline);    // Vertical left
+    sys_draw_rect(x, y, 10, 1, color_outline);    // Top
+    sys_draw_rect(x+1, y+1, 1, 12, color_fill);   // Fill Vert
+    
+    // Diagonal
+    for i in 0..10 {
+        sys_draw_rect(x + i, y + i, 2, 11-i, color_fill); // Solid fill body (imperfect)
+        sys_draw_rect(x + i, y + i, 1, 1, color_outline); // Diagonal edge
+    }
+    
+    // Just drawing a classic shape manually
+    //      *
+    //      **
+    //      ***
+    //      ****
+    //      *****
+    //      ******
+    
+    // Revert to simple predictable shape if complex loop fails
+    
+    // Arrow Vert
+    sys_draw_rect(x, y, 2, 16, color_outline);
+    // Arrow Diag
+    // ...
+    // Let's do a Crosshair/Pointer hybrid that is easy to draw with rects
+    // White Circle with Black Outline?
+    
+    // Circle approximation (Square with cut corners)
+    // 10x10
+    let cx = x - 5;
+    let cy = y - 5;
+    
+    // Crosshair lines
+    sys_draw_rect(x - 8, y, 17, 1, color_black_alpha(128));
+    sys_draw_rect(x, y - 8, 1, 17, color_black_alpha(128));
+    
+    // White Box Pointer
+    sys_draw_rect(x, y, 10, 10, color_fill);
+    sys_draw_rect(x, y, 10, 1, color_outline);
+    sys_draw_rect(x, y, 1, 10, color_outline);
+    sys_draw_rect(x+9, y, 1, 10, color_outline);
+    sys_draw_rect(x, y+9, 10, 1, color_outline);
+}
+
+fn color_black_alpha(a: u8) -> i32 {
+    (0x00_00_00_00 | (a as u32)) as i32
 }
 
 // Global Single State
@@ -183,9 +358,6 @@ pub extern "C" fn step() {
         if let Some(state) = STATE.as_mut() {
              // Poll Events
             let mut event_bytes = [0u8; 16];
-            // Loop until queue empty? 
-            // Or just one per step?
-            // Better to process all pending events to track mouse smoothly
             loop {
                 let res = sys_poll_event(event_bytes.as_mut_ptr());
                 if res == 1 {
@@ -214,10 +386,5 @@ pub extern "C" fn step() {
 
 #[no_mangle]
 pub extern "C" fn _start() {
-    // Legacy fallback: if host calls _start expecting blocking behavior
-    // We can just call init.
-    // If host doesn't support step, this will exit and state is lost (if using stack)
-    // But we used static mut STATE, so it persists?
-    // But who calls update?
     init();
 }
