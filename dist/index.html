@@ -7,8 +7,8 @@
     <title>wasmix</title>
     
 <script type="module">
-import init, * as bindings from '/wasmix-2685a588f43d9406.js';
-const wasm = await init({ module_or_path: '/wasmix-2685a588f43d9406_bg.wasm' });
+import init, * as bindings from '/wasmix-73422a31d8e8d5b4.js';
+const wasm = await init({ module_or_path: '/wasmix-73422a31d8e8d5b4_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -43,7 +43,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
             top: -1000px;
         }
     </style>
-<link rel="modulepreload" href="/wasmix-2685a588f43d9406.js" crossorigin="anonymous" integrity="sha384-AgB+HScNW/cwqoQG4j7WXufMTft8QV4B7Q8vd3tNOMiwpKQMWcigqlnJnK7qw4Rb"><link rel="preload" href="/wasmix-2685a588f43d9406_bg.wasm" crossorigin="anonymous" integrity="sha384-peXzYhSRuaRIrAxPZomsS3+nJ21uqc7klpXs5g/1HAialO+MtmcLjmcyiynMqC22" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/wasmix-73422a31d8e8d5b4.js" crossorigin="anonymous" integrity="sha384-AgB+HScNW/cwqoQG4j7WXufMTft8QV4B7Q8vd3tNOMiwpKQMWcigqlnJnK7qw4Rb"><link rel="preload" href="/wasmix-73422a31d8e8d5b4_bg.wasm" crossorigin="anonymous" integrity="sha384-O3Ou9Cda4793X0U66iK0IB9ReePPzYe53GVPzAv7IQS/smEZp//tNdads04V9pgR" as="fetch" type="application/wasm"></head>
 
 <body>
     <canvas id="screen" width="512" height="512"></canvas>

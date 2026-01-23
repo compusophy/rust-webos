@@ -112,12 +112,13 @@ pub fn on_keydown(key: String, _ctrl: bool, _alt: bool, _meta: bool) {
     MACHINE.with(|m| {
         if let Ok(mut borrow) = m.try_borrow_mut() {
             if let Some(machine) = borrow.as_mut() {
-             machine.events.borrow_mut().push_back(kernel::SystemEvent {
-                 event_type: kernel::EventType::KeyDown,
-                 code: 0, // TODO: Map keys
-                 x: 0,
-                 y: 0,
-             });
+                machine.events.borrow_mut().push_back(kernel::SystemEvent {
+                    event_type: kernel::EventType::KeyDown,
+                    code: 0, // TODO: Map keys
+                    x: 0,
+                    y: 0,
+                });
+            }
         }
     });
     
@@ -134,12 +135,13 @@ pub fn on_keyup(_key: String) {
     MACHINE.with(|m| {
         if let Ok(mut borrow) = m.try_borrow_mut() {
             if let Some(machine) = borrow.as_mut() {
-             machine.events.borrow_mut().push_back(kernel::SystemEvent {
-                 event_type: kernel::EventType::KeyUp,
-                 code: 0, 
-                 x: 0,
-                 y: 0,
-             });
+                machine.events.borrow_mut().push_back(kernel::SystemEvent {
+                    event_type: kernel::EventType::KeyUp,
+                    code: 0, 
+                    x: 0,
+                    y: 0,
+                });
+            }
         }
     });
 }
@@ -149,12 +151,13 @@ pub fn on_mousedown(x: i32, y: i32, button: i32) {
     MACHINE.with(|m| {
         if let Ok(mut borrow) = m.try_borrow_mut() {
             if let Some(machine) = borrow.as_mut() {
-             machine.events.borrow_mut().push_back(kernel::SystemEvent {
-                 event_type: kernel::EventType::MouseDown,
-                 code: button as u32,
-                 x,
-                 y,
-             });
+                machine.events.borrow_mut().push_back(kernel::SystemEvent {
+                    event_type: kernel::EventType::MouseDown,
+                    code: button as u32,
+                    x,
+                    y,
+                });
+            }
         }
     });
 }
@@ -164,12 +167,13 @@ pub fn on_mouseup(x: i32, y: i32, button: i32) {
     MACHINE.with(|m| {
         if let Ok(mut borrow) = m.try_borrow_mut() {
             if let Some(machine) = borrow.as_mut() {
-             machine.events.borrow_mut().push_back(kernel::SystemEvent {
-                 event_type: kernel::EventType::MouseUp,
-                 code: button as u32,
-                 x,
-                 y,
-             });
+                machine.events.borrow_mut().push_back(kernel::SystemEvent {
+                    event_type: kernel::EventType::MouseUp,
+                    code: button as u32,
+                    x,
+                    y,
+                });
+            }
         }
     });
 }
@@ -179,12 +183,13 @@ pub fn on_mousemove(x: i32, y: i32) {
     MACHINE.with(|m| {
         if let Ok(mut borrow) = m.try_borrow_mut() {
             if let Some(machine) = borrow.as_mut() {
-             machine.events.borrow_mut().push_back(kernel::SystemEvent {
-                 event_type: kernel::EventType::MouseMove,
-                 code: 0,
-                 x,
-                 y,
-             });
+                machine.events.borrow_mut().push_back(kernel::SystemEvent {
+                    event_type: kernel::EventType::MouseMove,
+                    code: 0,
+                    x,
+                    y,
+                });
+            }
         }
     });
 }
