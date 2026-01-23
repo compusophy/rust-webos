@@ -91,7 +91,7 @@ impl Shell {
         self.current_path = path;
     }
 
-    pub fn on_key(&mut self, key: &str, term: &mut crate::term::Terminal, fs: &mut crate::sys::fs::FileSystem, wasm: &crate::sys::wasm::WasmRuntime, gpu: &mut crate::hw::gpu::Gpu, gui_mode: &mut bool, events: &mut std::collections::VecDeque<crate::kernel::SystemEvent>, ticks: u64, hz: f64) -> bool {
+    pub fn on_key(&mut self, key: &str, term: &mut crate::term::Terminal, fs: &mut crate::sys::fs::FileSystem, wasm: &crate::sys::wasm::WasmRuntime, gpu: &mut crate::hw::gpu::Gpu, events: &mut std::collections::VecDeque<crate::kernel::SystemEvent>, ticks: u64, hz: f64) -> bool {
         // Handle confirmation dialog
         if self.waiting_for_reset {
             if key == "Enter" {
@@ -137,7 +137,7 @@ impl Shell {
                 self.history.push(self.input_buffer.clone());
                 self.history_index = None;
             }
-            let reboot = self.execute_command(term, fs, wasm, gpu, gui_mode, events, ticks, hz);
+            let reboot = self.execute_command(term, fs, wasm, gpu, events, ticks, hz);
             self.input_buffer.clear();
             self.draw_prompt(term);
             return reboot;
@@ -186,7 +186,7 @@ impl Shell {
         false
     }
 
-    fn execute_command(&mut self, term: &mut crate::term::Terminal, fs: &mut crate::sys::fs::FileSystem, wasm: &crate::sys::wasm::WasmRuntime, gpu: &mut crate::hw::gpu::Gpu, gui_mode: &mut bool, events: &mut std::collections::VecDeque<crate::kernel::SystemEvent>, ticks: u64, hz: f64) -> bool {
+    fn execute_command(&mut self, term: &mut crate::term::Terminal, fs: &mut crate::sys::fs::FileSystem, wasm: &crate::sys::wasm::WasmRuntime, gpu: &mut crate::hw::gpu::Gpu, events: &mut std::collections::VecDeque<crate::kernel::SystemEvent>, ticks: u64, hz: f64) -> bool {
         let full_input = self.input_buffer.trim().to_string(); // Clone to break borrow
         if full_input.is_empty() {
             return false;
@@ -197,7 +197,7 @@ impl Shell {
         
         
         for cmd_str in commands {
-            let res = self.run_one_command(cmd_str.trim(), term, fs, wasm, gpu, gui_mode, events, ticks, hz);
+            let res = self.run_one_command(cmd_str.trim(), term, fs, wasm, gpu, events, ticks, hz);
 
             match res {
                 CmdResult::Success => continue,
@@ -208,7 +208,7 @@ impl Shell {
         false
     }
     
-    fn run_one_command(&mut self, cmd_str: &str, term: &mut crate::term::Terminal, fs: &mut crate::sys::fs::FileSystem, wasm: &crate::sys::wasm::WasmRuntime, _gpu: &mut crate::hw::gpu::Gpu, _gui_mode: &mut bool, _events: &mut std::collections::VecDeque<crate::kernel::SystemEvent>, ticks: u64, hz: f64) -> CmdResult {
+    fn run_one_command(&mut self, cmd_str: &str, term: &mut crate::term::Terminal, fs: &mut crate::sys::fs::FileSystem, wasm: &crate::sys::wasm::WasmRuntime, _gpu: &mut crate::hw::gpu::Gpu, _events: &mut std::collections::VecDeque<crate::kernel::SystemEvent>, ticks: u64, hz: f64) -> CmdResult {
         if cmd_str.is_empty() {
              return CmdResult::Success;
         }

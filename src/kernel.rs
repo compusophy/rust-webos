@@ -200,12 +200,11 @@ impl Machine {
                              let mut term = self.term.borrow_mut();
                              let mut fs = self.fs.borrow_mut();
                              let mut gpu = self.bus.gpu.borrow_mut();
-                             let mut gui_mode_guard = self.gui_mode.borrow_mut();
                              let mut shell = self.shell.borrow_mut();
                              
                              let mut events = self.events.borrow_mut();
                              
-                             shell.on_key(&key, &mut term, &mut fs, &self.wasm, &mut gpu, &mut gui_mode_guard, &mut events, self.tick_count, self.real_fps)
+                             shell.on_key(&key, &mut term, &mut fs, &self.wasm, &mut gpu, &mut events, self.tick_count, self.real_fps)
                          };
                          
                          if should_reboot {
