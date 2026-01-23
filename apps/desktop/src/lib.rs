@@ -62,20 +62,9 @@ impl DesktopState {
         let width = unsafe { sys_gpu_width() };
         let height = unsafe { sys_gpu_height() };
         
-        let mut windows = Vec::new();
-        windows.push(Window {
-            x: 50, y: 50, w: 300, h: 200,
-            title: "File Manager".to_string(),
-            content_type: "file_manager".to_string(),
-            is_dragging: false, drag_offset_x: 0, drag_offset_y: 0,
-        });
-
-        windows.push(Window {
-            x: 100, y: 150, w: 300, h: 200,
-            title: "Terminal".to_string(),
-            content_type: "terminal".to_string(),
-            is_dragging: false, drag_offset_x: 0, drag_offset_y: 0,
-        });
+        let windows = Vec::new();
+        // Default windows removed as per user request
+        // windows.push(...);
 
         Self {
             width,
@@ -85,7 +74,7 @@ impl DesktopState {
             cursor_y: height / 2,
             mouse_down: false,
             start_menu_open: false,
-            active_window_idx: Some(1), // Terminal on top by default
+            active_window_idx: None,
         }
     }
     
@@ -94,8 +83,52 @@ impl DesktopState {
             3 => { // MouseDown
                 self.mouse_down = true;
                 
-                // Handle Start Menu Click
                 let taskbar_y = self.height - 40;
+                
+                // Handle Start Menu Interactions
+                if self.start_menu_open {
+                    let menu_w = 150;
+                    let menu_h = 200;
+                    let menu_x = 2;
+                    let menu_y = taskbar_y - menu_h;
+                    
+                    // Check if clicked inside menu
+                    if self.cursor_x >= menu_x && self.cursor_x <= menu_x + menu_w &&
+                       self.cursor_y >= menu_y && self.cursor_y <= menu_y + menu_h {
+                        
+                        // Simple hit test for items (20px height approx)
+                        let rel_y = self.cursor_y - menu_y;
+                        
+                        // "Programs" (Terminal) -> y=10..30
+                        if rel_y >= 10 && rel_y <= 30 {
+                             self.windows.push(Window {
+                                x: 100, y: 100, w: 400, h: 300,
+                                title: "Terminal".to_string(),
+                                content_type: "terminal".to_string(),
+                                is_dragging: false, drag_offset_x: 0, drag_offset_y: 0,
+                            });
+                            self.active_window_idx = Some(self.windows.len() - 1);
+                            self.start_menu_open = false;
+                            return;
+                        }
+                        // "Documents" (File Manager) -> y=30..50
+                        if rel_y >= 30 && rel_y <= 50 {
+                             self.windows.push(Window {
+                                x: 50, y: 50, w: 400, h: 300,
+                                title: "File Manager".to_string(),
+                                content_type: "file_manager".to_string(),
+                                is_dragging: false, drag_offset_x: 0, drag_offset_y: 0,
+                            });
+                            self.active_window_idx = Some(self.windows.len() - 1);
+                            self.start_menu_open = false;
+                            return;
+                        }
+                        
+                        return; // Clicked in menu but no item
+                    }
+                }
+
+                // Handle Start Button Click
                 if self.cursor_y >= taskbar_y {
                     if self.cursor_x >= 2 && self.cursor_x <= 62 {
                         self.start_menu_open = !self.start_menu_open;
@@ -187,15 +220,15 @@ impl DesktopState {
                  sys_draw_rect(btn_x, btn_y, btn_w, btn_h, COLOR_WHITE); 
                  sys_draw_rect(btn_x+1, btn_y+1, btn_w-2, btn_h-2, COLOR_GRAY);
                  sys_draw_rect(btn_x+2, btn_y+2, btn_w-4, btn_h-4, COLOR_DARK_GRAY); // Shadow inside
+                 draw_text(btn_x + 12, btn_y + 10, "Start", COLOR_BLACK); // Shifted down for press effect
             } else {
                  sys_draw_rect(btn_x, btn_y, btn_w, btn_h, COLOR_WHITE); // Bevel Light
                  sys_draw_rect(btn_x+1, btn_y+1, btn_w-2, btn_h-2, COLOR_DARK_GRAY); // Bevel Shadow
                  sys_draw_rect(btn_x+1, btn_y+1, btn_w-3, btn_h-3, COLOR_GRAY); // Face
+                 draw_text(btn_x + 10, btn_y + 8, "Start", COLOR_BLACK);
             }
-            draw_text(btn_x + 10, btn_y + 8, "Start", COLOR_BLACK);
-
-            // Time (Mock)
-            draw_text(self.width - 60, tb_y + 12, "12:00 PM", COLOR_BLACK);
+            
+            // Time Removed as per user request
 
             // 3. Draw Windows
             for (i, win) in self.windows.iter().enumerate() {
