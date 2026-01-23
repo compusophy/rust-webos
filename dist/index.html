@@ -7,8 +7,8 @@
     <title>wasmix</title>
     
 <script type="module">
-import init, * as bindings from '/wasmix-80735a6d21745a0e.js';
-const wasm = await init({ module_or_path: '/wasmix-80735a6d21745a0e_bg.wasm' });
+import init, * as bindings from '/wasmix-23e6bba987a8cdb6.js';
+const wasm = await init({ module_or_path: '/wasmix-23e6bba987a8cdb6_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -22,7 +22,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
             background-color: #111;
             display: flex;
             justify-content: center;
-            align-items: center;
+            align-items: flex-start;
             height: 100vh;
             margin: 0;
             overflow: hidden;
@@ -36,11 +36,18 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
             max-height: 100%;
             object-fit: contain;
         }
+
+        #hidden-input {
+            position: absolute;
+            opacity: 0;
+            top: -1000px;
+        }
     </style>
-<link rel="modulepreload" href="/wasmix-80735a6d21745a0e.js" crossorigin="anonymous" integrity="sha384-SMSma/YzwH2nRB34PAnvuybDyqs01rtM4ypMq+GKJiy/sBzBN+/VhDl1H3/S+0kq"><link rel="preload" href="/wasmix-80735a6d21745a0e_bg.wasm" crossorigin="anonymous" integrity="sha384-OR7T2KXReAIiBIAxgiNUjCWiJ+PHSYKYjlgveEaexcWrfxCJBVf0TYVziiiZIydY" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/wasmix-23e6bba987a8cdb6.js" crossorigin="anonymous" integrity="sha384-SMSma/YzwH2nRB34PAnvuybDyqs01rtM4ypMq+GKJiy/sBzBN+/VhDl1H3/S+0kq"><link rel="preload" href="/wasmix-23e6bba987a8cdb6_bg.wasm" crossorigin="anonymous" integrity="sha384-8hbtjQEClak/+F003wTbVUz+TTA7Z2GcteX4yShBM/RevSz9HPjJaA9owZCmcwm2" as="fetch" type="application/wasm"></head>
 
 <body>
     <canvas id="screen" width="512" height="512"></canvas>
+    <input type="text" id="hidden-input" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
     <script type="module">
         window.addEventListener("TrunkApplicationStarted", async (e) => {
             const { init_os, tick, on_keydown, on_keyup, get_video_buffer_ptr } = window.wasmBindings;
@@ -51,17 +58,53 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 
             const canvas = document.getElementById('screen');
             const ctx = canvas.getContext('2d');
+            const hiddenInput = document.getElementById('hidden-input');
+
+            // Quality of Life: Focus hidden input on click
+            const focusInput = () => {
+                hiddenInput.focus();
+            };
+            window.addEventListener('click', focusInput);
+            window.addEventListener('touchstart', focusInput);
 
             // Input handling
-            document.addEventListener('keydown', (e) => {
-                on_keydown(e.key, e.ctrlKey, e.altKey, e.metaKey);
-                // Prevent default for common terminal keys
-                if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab', 'Backspace', 'Enter'].includes(e.key) || (e.ctrlKey)) {
-                    e.preventDefault();
+            // Mobile (Android/iOS) Fix: Listen to 'input' on the hidden field
+            hiddenInput.addEventListener('input', (e) => {
+                const val = hiddenInput.value;
+
+                if (e.inputType === 'insertText') {
+                    if (e.data) {
+                        for (const char of e.data) {
+                            on_keydown(char, false, false, false);
+                        }
+                    }
+                } else if (e.inputType === 'deleteContentBackward') {
+                    on_keydown('Backspace', false, false, false);
+                }
+
+                hiddenInput.value = "";
+            });
+
+            window.addEventListener('keydown', (e) => {
+                // Ignore "Processing" keycodes (common on Android for virtual keys)
+                if (e.keyCode === 229) {
+                    return;
+                }
+
+                // Allow control keys (Arrows, Enter, Tab, etc.) via keydown
+                // But avoid duplicating normal letters if the keyboard sends them as keydown too
+                const isControlKey = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab', 'Backspace', 'Enter', 'Escape', 'Control', 'Alt', 'Shift', 'Meta'].includes(e.key);
+
+                if (isControlKey || e.ctrlKey || e.altKey || e.metaKey) {
+                    on_keydown(e.key, e.ctrlKey, e.altKey, e.metaKey);
+
+                    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab', 'Backspace', 'Enter'].includes(e.key) || (e.ctrlKey)) {
+                        e.preventDefault();
+                    }
                 }
             });
 
-            document.addEventListener('keyup', (e) => {
+            window.addEventListener('keyup', (e) => {
                 on_keyup(e.key);
             });
 

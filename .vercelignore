@@ -1,0 +1,14 @@
+# Build artifacts
+target/
+dist/
+
+# Source
+src/
+Cargo.lock
+Cargo.toml
+Trunk.toml
+README.md
+
+# Config
+.gitignore
+deploy.ps1

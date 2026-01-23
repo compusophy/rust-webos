@@ -1,3 +1,18 @@
+/*
+ * MIT License
+ * 
+ * Copyright (c) 2026 CompuSophy
+ * 
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ * 
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ */
 
 use crate::term::Terminal;
 
@@ -31,11 +46,11 @@ impl Bios {
                 
                 if self.ticks == 10 {
                     term.reset();
-                    term.write_str("wasmix BIOS v0.1.0\n");
-                    term.write_str("Copyright (C) 2026 CompuSophy Inc.\n\n");
-                    term.write_str("Detecting Hardware...\n");
-                    term.write_str("CPU: WASM-32 Virtual Core\n");
-                    term.write_str("Display: 512x512 RGBA (1 MB VRAM)\n");
+                    term.write_str("wasmix bios v0.1.0\n");
+                    term.write_str("copyright (c) 2026 compusophy inc.\n\n");
+                    term.write_str("detecting hardware...\n");
+                    term.write_str("cpu: wasm-32 virtual core\n");
+                    term.write_str("display: 512x512 rgba (1 mb vram)\n");
                     self.state = BiosState::MemoryTest;
                 }
             },
@@ -46,11 +61,11 @@ impl Bios {
                      let mem = (progress * 16384.0) as u32;
                      
                      if mem >= 16384 {
-                         let msg = format!("\rMemory Test: {} KB OK\n", 16384);
+                         let msg = format!("\rmemory test: {} kb ok\n", 16384);
                          term.write_str(&msg);
                          self.state = BiosState::Booting;
                      } else {
-                         let msg = format!("\rMemory Test: {} KB OK", mem);
+                         let msg = format!("\rmemory test: {} kb ok", mem);
                          term.write_str(&msg);
                      }
                 }

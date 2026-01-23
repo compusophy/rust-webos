@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use serde::{Serialize, Deserialize};
-use wasm_bindgen::prelude::*;
+
 
 #[derive(Clone, Serialize, Deserialize)]
 #[allow(dead_code)]
@@ -60,6 +60,25 @@ impl FileSystem {
         // Initialize standard directories
         fs.mkdir_internal("local").unwrap();
         fs.mkdir_internal("tmp").unwrap();
+        fs.mkdir_internal("bin").unwrap();
+
+        // Preload hello.wasm
+        let hello_wasm = include_bytes!(r"../../apps/hello/target/wasm32-unknown-unknown/release/hello.wasm");
+        if let Some(bin) = fs.root.children.get_mut("bin") {
+             bin.children.insert("hello.wasm".to_string(), Node::new_file("hello.wasm", hello_wasm.to_vec()));
+        }
+
+        // Preload math.wasm
+        let math_wasm = include_bytes!(r"../../apps/math/target/wasm32-unknown-unknown/release/math.wasm");
+         if let Some(bin) = fs.root.children.get_mut("bin") {
+             bin.children.insert("math.wasm".to_string(), Node::new_file("math.wasm", math_wasm.to_vec()));
+        }
+
+        // Preload desktop.wasm
+        let desktop_wasm = include_bytes!(r"../../apps/desktop/target/wasm32-unknown-unknown/release/desktop.wasm");
+         if let Some(bin) = fs.root.children.get_mut("bin") {
+             bin.children.insert("desktop.wasm".to_string(), Node::new_file("desktop.wasm", desktop_wasm.to_vec()));
+        }
         
         // Load persistent storage for "local"
         fs.load_local_disk();
@@ -216,7 +235,7 @@ impl FileSystem {
     }
     
     // Helpers
-    fn resolve_dir(&self, path: &[String]) -> Option<&Node> {
+    pub fn resolve_dir(&self, path: &[String]) -> Option<&Node> {
         let mut current_node = &self.root;
         for part in path {
             if let Some(node) = current_node.children.get(part) {
