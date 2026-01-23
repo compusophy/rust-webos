@@ -56,6 +56,9 @@
             window.addEventListener('click', focusInput);
             window.addEventListener('touchstart', focusInput);
 
+            // Auto-focus on start
+            focusInput();
+
             // Input handling
             // Mobile (Android/iOS) Fix: Listen to 'input' on the hidden field
             hiddenInput.addEventListener('input', (e) => {
@@ -80,8 +83,19 @@
                     return;
                 }
 
-                // Allow control keys (Arrows, Enter, Tab, etc.) via keydown
-                // But avoid duplicating normal letters if the keyboard sends them as keydown too
+                // If input is NOT focused, we need to capture everything manually to allow typing without clicking
+                if (document.activeElement !== hiddenInput) {
+                    on_keydown(e.key, e.ctrlKey, e.altKey, e.metaKey);
+
+                    // Prevent scrolling/default actions for everything we capture
+                    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab', 'Backspace', 'Enter', ' '].includes(e.key)) {
+                        e.preventDefault();
+                    }
+                    return;
+                }
+
+                // If input IS focused, we only explicitly capture Control keys (Arrows, Enter, etc)
+                // We let the 'input' event handle normal typing (a, b, c) to support IME/Mobile properly
                 const isControlKey = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab', 'Backspace', 'Enter', 'Escape', 'Control', 'Alt', 'Shift', 'Meta'].includes(e.key);
 
                 if (isControlKey || e.ctrlKey || e.altKey || e.metaKey) {
