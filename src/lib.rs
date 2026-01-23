@@ -79,7 +79,7 @@ pub fn tick() {
             // Map text mode to GPU VRAM (conceptually)
             let gui_mode = *machine.gui_mode.borrow();
             if !gui_mode {
-                let mut term = machine.term.borrow_mut();
+                let term = machine.term.borrow_mut();
                 let mut gpu = machine.bus.gpu.borrow_mut();
                 term.render(&mut gpu, 4, 0);
             }

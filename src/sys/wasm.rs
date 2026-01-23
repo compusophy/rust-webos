@@ -71,7 +71,7 @@ impl WasmRuntime {
         
         // --- Host Functions ---
 
-        linker.func_wrap("env", "sys_print", |mut caller: Caller<WasmContext>, ptr: i32, len: i32| {
+        linker.func_wrap("env", "sys_print", |caller: Caller<WasmContext>, ptr: i32, len: i32| {
             if let Some(extern_mem) = caller.get_export("memory").and_then(|e| e.into_memory()) {
                 let mut buffer = vec![0u8; len as usize];
                 if extern_mem.read(&caller, ptr as usize, &mut buffer).is_ok() {
