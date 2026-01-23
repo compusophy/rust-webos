@@ -165,6 +165,26 @@ impl FileSystem {
         
         Ok(())
     }
+
+    pub fn remove_entry(&mut self, path: &str) -> Result<(), String> {
+        let path_clone = self.current_path.clone();
+        let target_dir = self.resolve_mut_dir(&path_clone)?;
+        
+        if let Some(node) = target_dir.children.remove(path) {
+             // Reclaim space (Simplified)
+             self.used_space = self.used_space.saturating_sub(node.size);
+             if let NodeType::Directory = node.node_type {
+                 self.used_space = self.used_space.saturating_sub(4096);
+             }
+             
+             if self.is_inside_local() {
+                 self.save_local_disk();
+             }
+             Ok(())
+        } else {
+             Err("File or directory not found".to_string())
+        }
+    }
     
     fn is_inside_local(&self) -> bool {
         // If current path starts with "local"

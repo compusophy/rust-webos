@@ -25,6 +25,7 @@ const COMMANDS: &[CommandDef] = &[
     CommandDef { name: "cd", desc: "Change directory" },
     CommandDef { name: "mkdir", desc: "Create directory" },
     CommandDef { name: "touch", desc: "Create file" },
+    CommandDef { name: "rm", desc: "Remove file/dir" },
     CommandDef { name: "df", desc: "Disk Usage" },
     CommandDef { name: "sysinfo", desc: "System Information" },
     CommandDef { name: "reboot", desc: "Reboot system" },
@@ -264,6 +265,22 @@ impl Shell {
                             term.write_str(&e);
                             term.write_char('\n');
                             CmdResult::Error
+                        }
+                    }
+                }
+            },
+            "rm" => {
+                if parts.len() < 2 {
+                    term.write_str("usage: rm <name>\n");
+                    CmdResult::Error
+                } else {
+                    match fs.remove_entry(parts[1]) {
+                        Ok(_) => CmdResult::Success,
+                        Err(e) => {
+                             term.write_str("error: ");
+                             term.write_str(&e);
+                             term.write_char('\n');
+                             CmdResult::Error
                         }
                     }
                 }
