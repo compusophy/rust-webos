@@ -1,4 +1,5 @@
 use crate::ui;
+use crate::shell::Shell;
 
 pub struct Window {
     pub id: usize,
@@ -7,23 +8,40 @@ pub struct Window {
     pub w: i32,
     pub h: i32,
     pub title: String,
-    pub content_type: String, // "file_manager", "terminal"
+    pub content_type: String, // "file_manager", "terminal", "task_manager"
     pub is_dragging: bool,
     pub drag_offset_x: i32,
     pub drag_offset_y: i32,
-    pub minimized: bool, // NEW
+    pub minimized: bool,
     
     // State for File Manager
     pub current_path: String,
     pub files: Vec<(bool, String)>,
     
     // State for Terminal
-    pub term_lines: Vec<String>,
-    pub term_input: String,
+    pub shell: Option<Shell>,
+    
+    // State for Task Manager
+    pub selected_pid: Option<usize>,
 }
 
 impl Window {
     pub fn new(id: usize, x: i32, y: i32, w: i32, h: i32, title: &str, content_type: &str) -> Self {
+        let mut shell = None;
+        if content_type == "terminal" {
+            // Calculate cols/rows based on window size
+            // Padding: Left 4, Right 4 => -8 width
+            // Header: 24, Bottom: 4 => -28 height
+            // Char: 8x16
+            let cols = (w - 8) / 8;
+            let rows = (h - 28) / 16;
+             // Ensure at least 1x1
+            let cols = if cols > 0 { cols as usize } else { 1 };
+            let rows = if rows > 0 { rows as usize } else { 1 };
+            
+            shell = Some(Shell::new(cols, rows));
+        }
+
         let mut win = Self {
             id,
             x, y, w, h,
@@ -32,57 +50,25 @@ impl Window {
             is_dragging: false,
             drag_offset_x: 0,
             drag_offset_y: 0,
-            minimized: false, // NEW
+            minimized: false,
             current_path: "/".to_string(),
             files: Vec::new(),
-            term_lines: Vec::new(),
-            term_input: String::new(),
+            shell,
+            selected_pid: None,
         };
         
         if content_type == "file_manager" {
             win.refresh_files();
-        } else if content_type == "terminal" {
-            // No welcome message to match Kernel Shell
         }
         
         win
     }
     
     pub fn on_key(&mut self, code: u32) {
-        if self.minimized { return; } // NEW: Ignore input if minimized
-        if self.content_type != "terminal" { return; }
-        
-        match code {
-            10 => { // Enter
-                let cmd = self.term_input.trim().to_string();
-                self.term_lines.push(format!("user@wasmix:~$ {}", self.term_input));
-                self.term_input.clear();
-                
-                // Parse Command
-                if cmd == "clear" {
-                     self.term_lines.clear();
-                } else if !cmd.is_empty() {
-                     let output = ui::exec(&cmd);
-                     for line in output.lines() {
-                         self.term_lines.push(line.to_string());
-                     }
-                }
-                
-                // Keep history limited
-                if self.term_lines.len() > 14 {
-                    let remove = self.term_lines.len() - 14;
-                    self.term_lines.drain(0..remove);
-                }
-            },
-            8 => { // Backspace
-                self.term_input.pop();
-            },
-            _ => {
-                if let Some(c) = std::char::from_u32(code) {
-                     if c.is_ascii_graphic() || c == ' ' {
-                         self.term_input.push(c);
-                     }
-                }
+        if self.minimized { return; }
+        if self.content_type == "terminal" {
+            if let Some(shell) = &mut self.shell {
+                shell.on_key(code);
             }
         }
     }
@@ -98,14 +84,11 @@ impl Window {
 
     pub fn title_bar_contains(&self, x: i32, y: i32) -> bool {
         if self.minimized { return false; }
-        // Title bar is 22px height approx (including borders)
-        // From drawing code: y..y+25 area generally
         x >= self.x && x < self.x + self.w && y >= self.y && y < self.y + 25
     }
 
     pub fn close_button_contains(&self, x: i32, y: i32) -> bool {
         if self.minimized { return false; }
-        // Close button: right aligned.
         let btn_x = self.x + self.w - 20;
         let btn_y = self.y + 5;
         let btn_w = 14;
@@ -115,8 +98,6 @@ impl Window {
     
     pub fn minimize_button_contains(&self, x: i32, y: i32) -> bool {
         if self.minimized { return false; }
-        // Minimize button: left of close button.
-        // Close is at w-20. Minimize at w-38? (14px width + 4px gap)
         let btn_x = self.x + self.w - 38;
         let btn_y = self.y + 5;
         let btn_w = 14;
@@ -124,9 +105,8 @@ impl Window {
         x >= btn_x && x < btn_x + btn_w && y >= btn_y && y < btn_y + btn_h
     }
 
-    // UPDATED: Accept optional reference to all windows for Task Manager
     pub fn draw(&self, is_active: bool, windows: Option<&Vec<Window>>) {
-        if self.minimized { return; } // Don't draw if minimized
+        if self.minimized { return; }
         
         unsafe {
              // Shadow
@@ -159,14 +139,12 @@ impl Window {
             let content_w = self.w - 8;
             let content_h = self.h - 28;
             
-            // White bg for content usually
             let bg = if self.content_type == "terminal" { ui::COLOR_BLACK } else { ui::COLOR_GRAY }; 
             ui::draw_panel_sunken(content_x, content_y, content_w, content_h, bg);
             
             // Draw Context
             match self.content_type.as_str() {
                 "file_manager" => {
-                    // Header
                     ui::draw_text(content_x + 5, content_y + 5, &format!("path: {}", self.current_path), ui::COLOR_WHITE);
                     ui::sys_draw_rect(content_x + 5, content_y + 16, content_w - 10, 1, ui::COLOR_DARK_GRAY);
                     
@@ -179,40 +157,42 @@ impl Window {
                     }
                 },
                 "terminal" => {
-                     // Draw Lines
-                     let mut dy = content_y + 5;
-                     for line in &self.term_lines {
-                         ui::draw_text(content_x + 5, dy, line, ui::COLOR_WHITE);
-                         dy += 16;
+                     if let Some(shell) = &self.shell {
+                         shell.draw(content_x, content_y);
                      }
-                     
-                     // Draw Input Line
-                     let prompt = format!("user@wasmix:~$ {}_", self.term_input);
-                     ui::draw_text(content_x + 5, dy, &prompt, ui::COLOR_WHITE);
                 },
                 "task_manager" => {
                     // Table Header
-                    ui::draw_text(content_x + 5, content_y + 5, "ID  Name        State", ui::COLOR_WHITE);
+                    // Table Header
+                    ui::draw_text(content_x + 5, content_y + 5, "id  name        state", ui::COLOR_WHITE);
                     ui::sys_draw_rect(content_x + 5, content_y + 16, content_w - 10, 1, ui::COLOR_DARK_GRAY);
                     
                     if let Some(wins) = windows {
                          let mut dy = content_y + 20;
                          for win in wins {
-                              let state = if win.minimized { "Min" } else { "Run" };
-                              // Manual formatting assuming monospace font approx 8px
-                              // ID: 3 chars, Name: 12 chars, State
+                              let state = if win.minimized { "min" } else { "run" };
                               let line = format!("{:<3} {:<11} {}", win.id, win.title, state);
+                              
+                              // Highlight Selection
+                              if Some(win.id) == self.selected_pid {
+                                  ui::sys_draw_rect(content_x + 2, dy - 2, content_w - 4, 16, ui::COLOR_HIGHLIGHT);
+                              }
+                              
                               ui::draw_text(content_x + 5, dy, &line, ui::COLOR_WHITE);
                               dy += 16;
                          }
                     }
+
+                    // End Task Button (Bottom Right)
+                    let btn_w = 80;
+                    let btn_h = 24;
+                    let btn_x = content_x + content_w - btn_w - 5;
+                    let btn_y = content_y + content_h - btn_h - 5;
                     
-                    // "End Task" Button area (visual representation)
-                    // If we support selection, we would highlight the selected row.
-                    // For now, let's keep it simple: Just a list. 
-                    // To make it functional (End Task), we need selection state.
-                    // Adding `selected_pid: Option<usize>` to Window struct is cleaner.
-                    // But for this step, let's just show the list.
+                    // Only active if selection is valid
+                    if self.selected_pid.is_some() {
+                        ui::draw_button(btn_x, btn_y, btn_w, btn_h, "end task", false);
+                    }
                 },
                 _ => {}
             }

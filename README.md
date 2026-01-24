@@ -104,5 +104,9 @@ trunk build --release
 - `src/lib.rs`: WASM Bindgen bridge (Browser Interface).
 - `apps/`: Source code for user-space WASM applications (`hello`, `math`, `desktop`).
 
+## Version
+
+**v0.2.0** - desktop terminal now starts in `/local/user` for cleaner ux, fixed refcell borrow panic in nested wasm exec.
+
 ## License
 MIT

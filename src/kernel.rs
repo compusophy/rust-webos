@@ -139,6 +139,9 @@ impl Machine {
                     // Handoff to Kernel
                     self.state = MachineState::Kernel;
                     
+                    // Clear Input Events accumulated during BIOS (prevent double input in Terminal)
+                    self.events.borrow_mut().clear();
+                    
                     // Clear BIOS Screen
                     term.set_bg_color(0x00_00_00_FF); 
                     term.reset();

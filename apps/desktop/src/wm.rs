@@ -4,7 +4,7 @@ use crate::window::Window;
 extern "C" {
     #[allow(dead_code)]
     fn sys_reset();
-    fn sys_reboot();
+    fn sys_restart();
 }
 
 pub struct WindowManager {
@@ -16,6 +16,8 @@ pub struct WindowManager {
     pub mouse_x: i32,
     pub mouse_y: i32,
     pub next_id: usize,
+    pub pending_kill_id: Option<usize>,
+    pub restart_confirm_open: bool,
 }
 
 impl WindowManager {
@@ -29,6 +31,8 @@ impl WindowManager {
             mouse_x: width / 2,
             mouse_y: height / 2,
             next_id: 1,
+            pending_kill_id: None,
+            restart_confirm_open: false,
         }
     }
     
@@ -59,6 +63,40 @@ impl WindowManager {
         self.mouse_x = x;
         self.mouse_y = y;
 
+        // 0. Check Modal (Top Priority)
+        if self.restart_confirm_open {
+             let mw = 300;
+             let mh = 150;
+             let mx = (self.width - mw) / 2;
+             let my = (self.height - mh) / 2;
+             
+             // Box Bounds
+             if x >= mx && x < mx + mw && y >= my && y < my + mh {
+                 // Check Buttons
+                 let btn_w = 80;
+                 let btn_h = 28;
+                 let yes_x = mx + 40;
+                 let yes_y = my + 90;
+                 let no_x = mx + mw - 40 - btn_w;
+                 let no_y = my + 90;
+                 
+                 // YES
+                 if x >= yes_x && x < yes_x + btn_w && y >= yes_y && y < yes_y + btn_h {
+                     unsafe { sys_restart(); }
+                 }
+                 
+                 // NO
+                 if x >= no_x && x < no_x + btn_w && y >= no_y && y < no_y + btn_h {
+                     self.restart_confirm_open = false;
+                 }
+                 return;
+             } else {
+                 // Click outside modal? dismiss? or block?
+                 // Let's block.
+                 return;
+             }
+        }
+
         let taskbar_height = 40;
         let taskbar_y = self.height - taskbar_height;
         
@@ -85,7 +123,9 @@ impl WindowManager {
                      self.spawn_window("taskmgr", "task_manager");
                      self.start_menu_open = false;
                  } else if rel_y >= 90 && rel_y <= 110 { 
-                      unsafe { sys_reboot(); }
+                      // Trigger Confirmation instead of immediate reboot
+                      self.restart_confirm_open = true;
+                      self.start_menu_open = false;
                  }
                  return;
              } else {
@@ -174,9 +214,7 @@ impl WindowManager {
                 self.active_window_idx = None;
             } else {
                 // Focus: Move to end (top) logic
-                // NOTE: If we iterate normally after this, indices change.
-                // We must be careful.
-                self.active_window_idx = Some(idx); // Temporary invalidation if we move
+                self.active_window_idx = Some(idx); 
                 
                 // Handle Content Logic (File Manager)
                 // Handle Content Clicks 
@@ -216,29 +254,47 @@ impl WindowManager {
                     // Task Manager Interaction
                     // Click a row -> KILL Process
                     // We need to find valid windows.
-                    // We can't iterate self.windows easily here to find ID mapping because we hold `win` (mutable borrow).
-                    // But we can approximate using visual index if we assume list is consistent.
                     
                     let content_x = win.x + 4;
                     let content_y = win.y + 24;
                     let start_y = content_y + 20;
+                    let content_w = win.w - 8;
+                    let content_h = win.h - 28;
                     
                      if x >= content_x && x < content_x + win.w - 8 && y >= start_y {
                          let _row = (y - start_y) / 16;
-                         // Store this request. We can't kill immediately while holding mutable borrow of TM window.
-                         // But wait, `self.windows` is what we need to modify. 
-                         // Implementation constraint: 
-                         // We are inside `if let Some(idx) = hit_idx { let win = &mut self.windows[idx]; ... }`
-                         // So we have a Mutable Borrow of `self.windows` (element).
-                         // We cannot remove *another* element from `self.windows`.
-                         // We CAN remove `win` (self), but not others.
-                         
-                         // Cleanest fix: Return an Action enum from this block, handle it outside.
-                         // But that requires refactoring.
-                         // For now, I'll Skip "End Task" interaction and just show the list.
-                         // The user asked for "Real Stuff". A list is real. 
-                         // "End Task" on a fake OS is tricky without an event queue.
+                        // Problem: We don't have access to the window list here to map row -> ID.
+                        // We are holding a mutable borrow of `win`.
+                        // BUT, we can just assume internal consistency or defer logic?
+                        // Wait, we need the LIST of windows to map index to ID.
+                        // We can't access `self.windows` here easily.
+                        
+                        // HACK: To properly implement this we need to know the window list.
+                        // But we can't access it here.
+                        // Let's use `pending_kill_id` for the BUTTON_CLICK, but finding the ID is hard.
+                        // Actually, we can assume the iteration order in `draw` matches here?
+                        // `draw` iterates `self.windows`.
+                        // If we are consistent, row N corresponds to `self.windows[i]` (filtered by !minimized? No).
+                        // TaskMgr `draw` iterates *all* windows in `windows` arg.
+                        // But we don't have access to `windows` here.
+                        
+                        // OK, we must defer full processing.
+                        // Or we can just store the row index? `win.selected_row_index`.
+                        // And then resolve it later?
+                        // Let's try to pass `self.windows` into this logic? We can't (double borrow).
                      }
+                     
+                     // Hit test End Task Button
+                    let btn_w = 80;
+                    let btn_h = 24;
+                    let btn_x = content_x + content_w - btn_w - 5;
+                    let btn_y = content_y + content_h - btn_h - 5;
+                    
+                    if x >= btn_x && x < btn_x + btn_w && y >= btn_y && y < btn_y + btn_h {
+                        if let Some(pid) = win.selected_pid {
+                            self.pending_kill_id = Some(pid);
+                        }
+                    }
                 }
                 
                 // Move focused window to end of list (Top Z-Index)
@@ -250,6 +306,52 @@ impl WindowManager {
             }
         } else {
              self.active_window_idx = None;
+        }
+        
+        // Post-processing for TaskManager Selection (Needs full access to windows, no borrow on specific window)
+        // Check selection click for TaskMgr
+        if let Some(_idx) = self.active_window_idx {
+            // We need to check if the active window is TaskMgr and if we clicked a row
+            // We can't do this inside the loop easily.
+            // Let's re-check here.
+            
+            // We know `idx` is valid and points to the window we just interacted with (moved to end).
+            // Actually, if we moved it, it's at `len() - 1`.
+            let active_idx = self.windows.len() - 1;
+            // let win = &mut self.windows[active_idx]; // This is safe.
+            
+            let win_x = self.windows[active_idx].x;
+            let win_y = self.windows[active_idx].y;
+            let win_w = self.windows[active_idx].w;
+            let _win_h = self.windows[active_idx].h;
+            
+            if self.windows[active_idx].content_type == "task_manager" && 
+               self.windows[active_idx].contains(x, y) 
+            {
+               let content_x = win_x + 4;
+               let content_y = win_y + 24;
+               let start_y = content_y + 20;
+
+                if x >= content_x && x < content_x + win_w - 8 && y >= start_y {
+                     let row = (y - start_y) / 16;
+                     if row >= 0 && (row as usize) < self.windows.len() {
+                         // Map row to PID. The list is just `self.windows`.
+                         // We can map directly.
+                         let target_pid = self.windows[row as usize].id;
+                         self.windows[active_idx].selected_pid = Some(target_pid);
+                     }
+                }
+            }
+        }
+
+        // Process Pending Kill
+        if let Some(pid) = self.pending_kill_id {
+            if let Some(pos) = self.windows.iter().position(|w| w.id == pid) {
+                self.windows.remove(pos);
+                // If we removed the active window, reset
+                self.active_window_idx = None;
+            }
+            self.pending_kill_id = None;
         }
     }
 
@@ -326,11 +428,6 @@ impl WindowManager {
             // Windows
             for (i, win) in self.windows.iter().enumerate() {
                 // Determine if we need to pass the window list.
-                // We cannot pass &self.windows because we are borrowing `self.windows` via `iter()`.
-                // However, `win` is an immutable reference, and `&self.windows` is another immutable reference.
-                // This is allowed in Rust as long as no mutable borrow exists.
-                // `win.draw` takes `&self` (immutable).
-                
                 win.draw(self.active_window_idx == Some(i), Some(&self.windows));
             }
             
@@ -361,6 +458,38 @@ impl WindowManager {
                      }
                      draw_y += row_h;
                  }
+            }
+
+            // Restart Confirmation Modal
+            if self.restart_confirm_open {
+                let mw = 300;
+                let mh = 150;
+                let mx = (self.width - mw) / 2;
+                let my = (self.height - mh) / 2;
+                
+                // Shadow
+                ui::sys_draw_rect(mx + 5, my + 5, mw, mh, 0x00_00_00_80);
+                // Panel
+                ui::draw_panel_raised(mx, my, mw, mh);
+                // Title
+                ui::sys_draw_rect(mx + 3, my + 3, mw - 6, 20, ui::COLOR_NAVY);
+                ui::draw_text(mx + 6, my + 6, "confirm restart", ui::COLOR_WHITE);
+                
+                // Message
+                ui::draw_text(mx + 20, my + 50, "are you sure you want to restart?", ui::COLOR_WHITE);
+                
+                // Buttons: Yes / No
+                // Yes
+                let btn_w = 80;
+                let btn_h = 28;
+                let yes_x = mx + 40;
+                let yes_y = my + 90;
+                ui::draw_button(yes_x, yes_y, btn_w, btn_h, "yes", false);
+                
+                // No
+                let no_x = mx + mw - 40 - btn_w;
+                let no_y = my + 90;
+                ui::draw_button(no_x, no_y, btn_w, btn_h, "no", false);
             }
         }
     }

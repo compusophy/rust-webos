@@ -86,7 +86,7 @@ impl WasmRuntime {
                             if let Ok(mut gpu) = caller.data().gpu.try_borrow_mut() {
                                 let mut draw_x = 10;
                                 let draw_y = 480; 
-                                let alert = format!("KERNEL I/O: {}", msg);
+                                let alert = format!("kernel i/o: {}", msg);
                                 for c in alert.chars() {
                                      crate::gfx::font::draw_char(&mut gpu, draw_x, draw_y, c, 0xFF_00_00_FF);
                                      draw_x += 8;
@@ -184,12 +184,22 @@ impl WasmRuntime {
                                 next_process: caller.data().next_process.clone(),
                             };
 
-                            let mut shell = caller.data().shell.borrow_mut();
-                            let fs_rc = caller.data().fs.clone(); 
-                            let mut events = caller.data().events.borrow_mut();
+                            // Use a transient Shell to avoid RefCell Double Borrow Panic
+                            // The global kernel shell might be active (e.g. in run_one_command -> exec -> sys_exec)
+                            let mut shell = crate::sys::shell::Shell::new(); 
+                            
+                            let fs_rc = caller.data().fs.clone();
+                            let events_rc = caller.data().events.clone();
                             
                             // execute_string calls load(), which updates active_process if successful
-                            shell.execute_string(cmd_str_trim, &fs_rc, Some(&runtime), &mut events, 0, 0.0)
+                            // CRITICAL: Pass the Rc, not a borrow, to avoid double-borrow panics in nested sys_exec
+                            let (out_str, reboot) = shell.execute_string_rc(cmd_str_trim, &fs_rc, Some(&runtime), &events_rc, 0, 0.0);
+                            
+                            if reboot {
+                                *caller.data().should_reset.borrow_mut() = true;
+                            }
+                            
+                            out_str
                         };
 
                         let bytes = output.as_bytes();
@@ -212,7 +222,7 @@ impl WasmRuntime {
             *caller.data().should_reset.borrow_mut() = true;
         }).unwrap();
 
-        linker.func_wrap("env", "sys_reboot", |caller: Caller<WasmContext>| {
+        linker.func_wrap("env", "sys_restart", |caller: Caller<WasmContext>| {
             *caller.data().should_reset.borrow_mut() = true;
         }).unwrap();
 
@@ -313,6 +323,7 @@ impl WasmRuntime {
         }
 
         if let Ok(_) = instance.get_typed_func::<(), ()>(&store, "step") {
+            
             // Try explicit borrow first (works for Boot)
             if let Ok(mut guard) = self.active_process.try_borrow_mut() {
                 *guard = Some(ActiveProcess {
@@ -359,7 +370,7 @@ impl WasmRuntime {
         if let Some(bytes) = content {
              self.load(&bytes)
         } else {
-             Err("File not found".to_string())
+             Err("file not found".to_string())
         }
     }
 
@@ -370,7 +381,7 @@ impl WasmRuntime {
                  if let Ok(step_func) = process.instance.get_typed_func::<(), ()>(&process.store, "step") {
                      let res = step_func.call(&mut process.store, ());
                      if let Err(e) = res {
-                         web_sys::console::log_1(&format!("Process crashed: {}", e).into());
+                         web_sys::console::log_1(&format!("process crashed: {}", e).into());
                          *process_guard = None;
                          *self.gui_mode.borrow_mut() = false;
                      }

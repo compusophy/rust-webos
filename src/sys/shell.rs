@@ -6,6 +6,7 @@ pub struct Shell {
     history: Vec<String>,
     history_index: Option<usize>,
     waiting_for_reset: bool,
+    awaiting_restart_confirm: bool,
 }
 
 struct CommandDef {
@@ -17,25 +18,25 @@ struct CommandDef {
 pub enum CmdResult {
     Success,
     Error,
-    Reboot,
+    // Reboot, // Deprecated in favor of confirm flow
     Clear,
 }
 
 const COMMANDS: &[CommandDef] = &[
-    CommandDef { name: "help", desc: "Show this help" },
-    CommandDef { name: "clear", desc: "Clear screen" },
-    CommandDef { name: "ls", desc: "List files" },
-    CommandDef { name: "cd", desc: "Change directory" },
-    CommandDef { name: "mkdir", desc: "Create directory" },
-    CommandDef { name: "touch", desc: "Create file" },
-    CommandDef { name: "rm", desc: "Remove file/dir" },
-    CommandDef { name: "df", desc: "Disk Usage" },
-    CommandDef { name: "sysinfo", desc: "System Information" },
-    CommandDef { name: "reboot", desc: "Reboot system" },
-    CommandDef { name: "uptime", desc: "System uptime" },
-    CommandDef { name: "date", desc: "Real World Time" },
-    CommandDef { name: "reset", desc: "Factory Reset (Wipe Data)" },
-    CommandDef { name: "exec", desc: "Execute WASM Binary" },
+    CommandDef { name: "help", desc: "show this help" },
+    CommandDef { name: "clear", desc: "clear screen" },
+    CommandDef { name: "ls", desc: "list files" },
+    CommandDef { name: "cd", desc: "change directory" },
+    CommandDef { name: "mkdir", desc: "create directory" },
+    CommandDef { name: "touch", desc: "create file" },
+    CommandDef { name: "rm", desc: "remove file/dir" },
+    CommandDef { name: "df", desc: "disk usage" },
+    CommandDef { name: "sysinfo", desc: "system information" },
+    // CommandDef { name: "restart", desc: "restart system" }, // Handled by app shell or deprecated
+    CommandDef { name: "uptime", desc: "system uptime" },
+    CommandDef { name: "date", desc: "real world time" },
+    CommandDef { name: "reset", desc: "factory reset (wipe data)" },
+    CommandDef { name: "exec", desc: "execute wasm binary" },
 ];
 
 impl Shell {
@@ -46,6 +47,7 @@ impl Shell {
             history: Vec::new(),
             history_index: None,
             waiting_for_reset: false,
+            awaiting_restart_confirm: false,
         }
     }
 
@@ -100,8 +102,38 @@ impl Shell {
     }
 
     pub fn on_key(&mut self, key: &str, term: &std::rc::Rc<std::cell::RefCell<crate::term::Terminal>>, fs: &std::rc::Rc<std::cell::RefCell<crate::sys::fs::FileSystem>>, wasm: &crate::sys::wasm::WasmRuntime, events: &mut std::collections::VecDeque<crate::kernel::SystemEvent>, ticks: u64, hz: f64) -> bool {
-        // ... (lines 98-135 unchanged logical structure, but prompt update needs fs)
         // Handle confirmation dialog
+        if self.awaiting_restart_confirm {
+            if key == "Enter" {
+                term.borrow_mut().write_char('\n');
+                let input = self.input_buffer.trim();
+                
+                if input == "y" || input == "Y" {
+                    term.borrow_mut().write_str("restarting system...\n");
+                    self.input_buffer.clear();
+                    self.awaiting_restart_confirm = false;
+                    return true; // Trigger RESTART (mapped to Re-boot/start enum)
+                } else {
+                    term.borrow_mut().write_str("restart cancelled.\n");
+                    self.input_buffer.clear();
+                    self.awaiting_restart_confirm = false;
+                    self.draw_prompt(term);
+                    return false;
+                }
+            } else if key == "Backspace" {
+                 if !self.input_buffer.is_empty() {
+                    self.input_buffer.pop();
+                    term.borrow_mut().write_char('\x08'); 
+                }
+                return false;
+            } else if key.len() == 1 {
+                self.input_buffer.push_str(key);
+                term.borrow_mut().write_str(key);
+                return false;
+            }
+            return false;
+        }
+
         if self.waiting_for_reset {
             if key == "Enter" {
                 term.borrow_mut().write_char('\n');
@@ -147,10 +179,12 @@ impl Shell {
                 self.history_index = None;
             }
             
-            let reboot = self.execute_command(term, fs, Some(wasm), events, ticks, hz);
+            let restart = self.execute_command(term, fs, Some(wasm), events, ticks, hz);
             self.input_buffer.clear();
-            self.draw_prompt(term);
-            return reboot;
+            if !self.awaiting_restart_confirm && !self.waiting_for_reset && !restart {
+                 self.draw_prompt(term);
+            }
+            return restart;
         } else if key == "Backspace" {
             if !self.input_buffer.is_empty() {
                 self.input_buffer.pop();
@@ -195,6 +229,7 @@ impl Shell {
         }
         false
     }
+
     
     pub fn execute_command(&mut self, term: &std::rc::Rc<std::cell::RefCell<crate::term::Terminal>>, fs: &std::rc::Rc<std::cell::RefCell<crate::sys::fs::FileSystem>>, wasm: Option<&crate::sys::wasm::WasmRuntime>, events: &mut std::collections::VecDeque<crate::kernel::SystemEvent>, ticks: u64, hz: f64) -> bool {
         let full_input = self.input_buffer.trim().to_string(); 
@@ -212,20 +247,21 @@ impl Shell {
             match res {
                 CmdResult::Success => continue,
                 CmdResult::Error => break, 
-                CmdResult::Reboot => return true,
+                // CmdResult::Reboot => return true,
                 CmdResult::Clear => term.borrow_mut().reset(),
             }
         }
         false
     }
     
-    pub fn execute_string(&mut self, full_input: &str, fs: &std::rc::Rc<std::cell::RefCell<crate::sys::fs::FileSystem>>, wasm: Option<&crate::sys::wasm::WasmRuntime>, events: &mut std::collections::VecDeque<crate::kernel::SystemEvent>, ticks: u64, hz: f64) -> String {
+    pub fn execute_string(&mut self, full_input: &str, fs: &std::rc::Rc<std::cell::RefCell<crate::sys::fs::FileSystem>>, wasm: Option<&crate::sys::wasm::WasmRuntime>, events: &mut std::collections::VecDeque<crate::kernel::SystemEvent>, ticks: u64, hz: f64) -> (String, bool) {
         let mut full_output = String::new();
         if full_input.trim().is_empty() {
-            return full_output;
+             return (full_output, false);
         }
         
         let commands: Vec<&str> = full_input.split("&&").collect();
+        let should_reboot = false;
         
         for cmd_str in commands {
             // Note: pass dummy term? Or does execute_string NOT print to term?
@@ -238,11 +274,123 @@ impl Shell {
             match res {
                 CmdResult::Success => continue,
                 CmdResult::Error => break, 
-                CmdResult::Reboot => full_output.push_str("System Rebooting...\n"),
+                // CmdResult::Reboot => {
+                //    full_output.push_str("System Rebooting...\n");
+                //    should_reboot = true;
+                // },
                 CmdResult::Clear => {}, 
             }
         }
-        full_output
+        (full_output, should_reboot)
+    }
+    
+    /// Variant that takes events as Rc<RefCell<...>> to avoid holding borrows across nested wasm calls
+    pub fn execute_string_rc(&mut self, full_input: &str, fs: &std::rc::Rc<std::cell::RefCell<crate::sys::fs::FileSystem>>, wasm: Option<&crate::sys::wasm::WasmRuntime>, events_rc: &std::rc::Rc<std::cell::RefCell<std::collections::VecDeque<crate::kernel::SystemEvent>>>, ticks: u64, hz: f64) -> (String, bool) {
+        let mut full_output = String::new();
+        if full_input.trim().is_empty() {
+             return (full_output, false);
+        }
+        
+        let commands: Vec<&str> = full_input.split("&&").collect();
+        let should_reboot = false;
+        
+        for cmd_str in commands {
+            let cmd_str = cmd_str.trim();
+            
+            // Special handling for exec: don't hold events borrow since wasm load may trigger syscalls
+            let is_exec = cmd_str.starts_with("exec ");
+            
+            let (res, output) = if is_exec {
+                // For exec, call run_one_command_rc which handles the Rc internally
+                self.run_one_command_rc(cmd_str, fs, wasm, events_rc, ticks, hz)
+            } else {
+                // For other commands, borrow events briefly
+                let mut events = events_rc.borrow_mut();
+                self.run_one_command(cmd_str, fs, wasm, &mut events, ticks, hz)
+            };
+            full_output.push_str(&output);
+
+            match res {
+                CmdResult::Success => continue,
+                CmdResult::Error => break, 
+                CmdResult::Clear => {}, 
+            }
+        }
+        (full_output, should_reboot)
+    }
+    
+    /// Handles exec command without holding events borrow (allows nested syscalls during wasm load)
+    fn run_one_command_rc(&mut self, cmd_str: &str, fs: &std::rc::Rc<std::cell::RefCell<crate::sys::fs::FileSystem>>, wasm: Option<&crate::sys::wasm::WasmRuntime>, _events_rc: &std::rc::Rc<std::cell::RefCell<std::collections::VecDeque<crate::kernel::SystemEvent>>>, _ticks: u64, _hz: f64) -> (CmdResult, String) {
+        let mut out = String::new();
+        let parts: Vec<&str> = cmd_str.split_whitespace().collect();
+        
+        // This should only be called for exec commands
+        if parts.is_empty() || parts[0] != "exec" {
+            out.push_str("internal error: run_one_command_rc called for non-exec\n");
+            return (CmdResult::Error, out);
+        }
+        
+        if parts.len() < 2 {
+            out.push_str("usage: exec <path>\n");
+            return (CmdResult::Error, out);
+        }
+        
+        if wasm.is_none() {
+            out.push_str("exec not supported in this environment\n");
+            return (CmdResult::Error, out);
+        }
+        
+        let wasm_rt = wasm.unwrap();
+        let path = parts[1];
+        
+        // Get file content without holding borrow during load
+        let file_node_content = {
+            let fs_guard = fs.borrow();
+            fs_guard.resolve_dir(&fs_guard.current_path) 
+                .and_then(|d| d.children.get(path))
+                .or_else(|| {
+                     if path.starts_with("/bin/") {
+                         fs_guard.root.children.get("bin").and_then(|b| b.children.get(&path[5..]))
+                     } else {
+                        None
+                     }
+                }).and_then(|node| {
+                    if let crate::sys::fs::NodeType::File = node.node_type {
+                        Some(node.content.clone())
+                    } else {
+                        None
+                    }
+                })
+        };
+
+        if let Some(content) = file_node_content {
+            out.push_str(&format!("loading wasm ({} bytes)...\n", content.len()));
+            // CRITICAL: No events borrow held here - wasm load can safely call syscalls
+            match wasm_rt.load(&content) {
+                Ok(captured_output) => {
+                    out.push_str(&captured_output);
+                    (CmdResult::Success, out)
+                },
+                Err(e) => {
+                    out.push_str(&format!("exec crash: {}\n", e));
+                    (CmdResult::Error, out)
+                }
+            }
+        } else {
+             let is_dir = {
+                 let fs_guard = fs.borrow();
+                 let dir = fs_guard.resolve_dir(&fs_guard.current_path).unwrap_or(&fs_guard.root);
+                 dir.children.get(path).is_some()
+             };
+             
+             if is_dir {
+                 out.push_str(&format!("error: '{}' is a directory\n", path));
+                 (CmdResult::Error, out)
+             } else {
+                 out.push_str(&format!("error: file '{}' not found\n", path));
+                 (CmdResult::Error, out)
+             }
+        }
     }
     
     fn run_one_command(&mut self, cmd_str: &str, fs: &std::rc::Rc<std::cell::RefCell<crate::sys::fs::FileSystem>>, wasm: Option<&crate::sys::wasm::WasmRuntime>, _events: &mut std::collections::VecDeque<crate::kernel::SystemEvent>, ticks: u64, hz: f64) -> (CmdResult, String) {
@@ -363,7 +511,7 @@ impl Shell {
             },
             "sysinfo" => {
                 out.push_str("system information:\n");
-                out.push_str("  kernel:  rust webos v0.1.0\n");
+                out.push_str("  kernel:  rust webos v0.2.0\n");
                 out.push_str("  arch:    wasm32-unknown-unknown\n");
                 let msg_cpu = format!("  cpu:     wasm-32 virtual core @ {:.2} hz\n", hz);
                 out.push_str(&msg_cpu);
@@ -372,9 +520,6 @@ impl Shell {
                 let msg_ticks = format!("  ticks:   {}\n", ticks);
                 out.push_str(&msg_ticks);
                 (CmdResult::Success, out)
-            },
-            "reboot" => {
-                (CmdResult::Reboot, out)
             },
             "uptime" => {
                 let seconds = ticks as f64 / 60.0;

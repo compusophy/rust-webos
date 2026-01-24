@@ -1,51 +1,27 @@
 mod term;
 mod ui;
+mod shell;
 
-static mut TERMINAL: Option<term::Terminal> = None;
-static mut INPUT_BUFFER: String = String::new();
-static mut HISTORY: Vec<String> = Vec::new();
-static mut HISTORY_INDEX: Option<usize> = None;
+use shell::Shell;
+
+static mut SHELL: Option<Shell> = None;
 
 #[no_mangle]
 pub extern "C" fn init() {
     ui::enable_gui_mode();
     ui::clear_screen();
     
-    // Initialize Terminal (Standard VGA size roughly, fits 640x480)
+    // Initialize Shell (Standard VGA size roughly, fits 640x480)
     // 640 / 8 = 80 cols
     // 480 / 16 = 30 rows (Full Height)
     // ACTUAL GPU IS 512x512.
     // 512 / 8 = 64 Cols
     // 512 / 16 = 32 Rows
-    let mut term = term::Terminal::new(64, 32);
-    
-    // Write Initial Prompt
-    write_prompt(&mut term);
+    let shell = Shell::new(64, 32);
     
     unsafe {
-        TERMINAL = Some(term);
+        SHELL = Some(shell);
     }
-}
-
-fn write_prompt(term: &mut term::Terminal) {
-    // "user" -> Orange
-    term.set_fg_color(0xFF_A5_00_FFu32 as i32);
-    term.write_str("user");
-    
-    // "@" -> White
-    term.set_fg_color(0xFF_FF_FF_FFu32 as i32);
-    term.write_str("@");
-    
-    // "wasmix" -> Green
-    term.set_fg_color(0x00_FF_00_FFu32 as i32);
-    term.write_str("wasmix");
-    
-    // ":path $ " -> White
-    let path = ui::getcwd();
-    term.set_fg_color(0xFF_FF_FF_FFu32 as i32);
-    term.write_str(":");
-    term.write_str(&path);
-    term.write_str("$ ");
 }
 
 #[no_mangle]
@@ -53,9 +29,9 @@ pub extern "C" fn step() {
     ui::enable_gui_mode();
 
     unsafe {
-        if let Some(term) = &mut *std::ptr::addr_of_mut!(TERMINAL) {
+        if let Some(shell) = &mut *std::ptr::addr_of_mut!(SHELL) {
             // Render at 4, 0. Match kernel.
-            term.render(4, 0);
+            shell.draw(4, 0);
         }
     }
 
@@ -76,63 +52,9 @@ pub extern "C" fn step() {
 
 fn handle_key(code: u32) {
     unsafe {
-        let term = match (*std::ptr::addr_of_mut!(TERMINAL)).as_mut() {
-            Some(t) => t,
-            None => return,
-        };
-
-        match code {
-            10 => { // Enter
-                let cmd = (*std::ptr::addr_of_mut!(INPUT_BUFFER)).trim().to_string();
-                
-                // New Line handled by execute or below
-                term.write_char('\n'); 
-                
-                if !cmd.is_empty() {
-                    (*std::ptr::addr_of_mut!(HISTORY)).push(cmd.clone());
-                    *std::ptr::addr_of_mut!(HISTORY_INDEX) = None;
-                    
-                    if cmd == "clear" {
-                        term.reset();
-                        // Repaint prompt
-                        write_prompt(term);
-                        (*std::ptr::addr_of_mut!(INPUT_BUFFER)).clear();
-                        return;
-                    } else {
-                        // Exec
-                        let output = ui::exec(&cmd);
-                        
-                        if !output.is_empty() {
-                            // Output is White
-                            term.set_fg_color(0xFF_FF_FF_FFu32 as i32);
-                            term.write_str(&output);
-                            if !output.ends_with('\n') {
-                                term.write_char('\n');
-                            }
-                        }
-                    }
-                }
-                
-                (*std::ptr::addr_of_mut!(INPUT_BUFFER)).clear();
-                write_prompt(term);
-            },
-            8 => { // Backspace
-                let input = &mut *std::ptr::addr_of_mut!(INPUT_BUFFER);
-                if !input.is_empty() {
-                    input.pop();
-                    term.write_char('\x08');
-                }
-            },
-            _ => {
-                if let Some(c) = std::char::from_u32(code) {
-                    if c.is_ascii_graphic() || c == ' ' {
-                        (*std::ptr::addr_of_mut!(INPUT_BUFFER)).push(c);
-                        // Input stays Colored (Green)
-                        term.set_fg_color(0x00_FF_00_FFu32 as i32); 
-                        term.write_char(c);
-                    }
-                }
-            }
+        if let Some(shell) = (*std::ptr::addr_of_mut!(SHELL)).as_mut() {
+            shell.on_key(code);
         }
     }
 }
+

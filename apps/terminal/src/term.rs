@@ -123,6 +123,7 @@ impl Terminal {
         self.default_fg = color;
     }
 
+    #[allow(dead_code)]
     pub fn set_bg_color(&mut self, color: i32) {
         self.default_bg = color;
     }

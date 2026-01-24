@@ -14,7 +14,23 @@ extern "C" {
     pub fn sys_draw_rect(x: i32, y: i32, w: i32, h: i32, color: i32);
     pub fn sys_draw_text(ptr: *const u8, len: usize, x: i32, y: i32, color: i32);
     pub fn sys_fs_list(path_ptr: *const u8, path_len: i32, out_ptr: *mut u8, out_len: i32) -> i32;
+    pub fn sys_fs_getcwd(out_ptr: *mut u8, out_len: i32) -> i32;
     pub fn sys_exec(cmd_ptr: *const u8, cmd_len: i32, out_ptr: *mut u8, out_len: i32) -> i32;
+    #[allow(dead_code)]
+    pub fn sys_restart();
+}
+
+pub fn getcwd() -> String {
+    let mut out_buf = [0u8; 1024];
+    let res = unsafe {
+        sys_fs_getcwd(out_buf.as_mut_ptr(), 1024)
+    };
+    
+    if res >= 0 {
+        std::str::from_utf8(&out_buf[0..res as usize]).unwrap_or("~").to_string()
+    } else {
+        "~".to_string()
+    }
 }
 
 pub fn read_dir(path: &str) -> Vec<(bool, String)> {
@@ -35,6 +51,13 @@ pub fn read_dir(path: &str) -> Vec<(bool, String)> {
         }
     }
     Vec::new()
+}
+
+
+pub fn draw_rect(x: i32, y: i32, w: i32, h: i32, color: i32) {
+    unsafe {
+        sys_draw_rect(x, y, w, h, color);
+    }
 }
 
 pub fn draw_text(x: i32, y: i32, text: &str, color: i32) {

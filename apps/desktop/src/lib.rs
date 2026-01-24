@@ -2,6 +2,12 @@ mod ui;
 mod window;
 mod wm;
 
+#[path = "../../terminal/src/term.rs"]
+mod term;
+
+#[path = "../../terminal/src/shell.rs"]
+mod shell;
+
 // System Calls
 extern "C" {
     fn sys_gpu_width() -> i32;
@@ -19,6 +25,13 @@ pub extern "C" fn init() {
         let w = sys_gpu_width();
         let h = sys_gpu_height();
         let mut manager = wm::WindowManager::new(w, h);
+        
+        // Set Default CWD for Desktop Environment
+        // cd only handles relative paths, so navigate step by step
+        ui::exec("cd /");
+        ui::exec("cd local");
+        ui::exec("cd user");
+        
         manager.init();
         
         *std::ptr::addr_of_mut!(WM) = Some(manager);

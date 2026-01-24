@@ -13,6 +13,7 @@ extern "C" {
     pub fn sys_enable_gui_mode();
     #[allow(dead_code)]
     pub fn sys_time() -> i32;
+    pub fn sys_restart();
 }
 
 pub fn enable_gui_mode() {
@@ -25,6 +26,7 @@ pub fn clear_screen() {
 
 // ...
 
+#[allow(dead_code)]
 pub fn time() -> f64 {
     unsafe {
         sys_time() as f64

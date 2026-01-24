@@ -33,10 +33,29 @@ pub struct Bios {
 
 impl Bios {
     pub fn new() -> Self {
+        let mut target = "/bin/terminal.wasm".to_string();
+        
+        // Try to load from localStorage
+        if let Some(window) = web_sys::window() {
+            if let Ok(Some(storage)) = window.local_storage() {
+                if let Ok(Some(stored)) = storage.get_item("wasmix_boot_target") {
+                    target = stored;
+                }
+            }
+        }
+
         Self {
             state: BiosState::PowerOn,
             ticks: 0,
-            boot_target: "/bin/terminal.wasm".to_string(), // Default
+            boot_target: target,
+        }
+    }
+    
+    fn save_boot_target(&self) {
+        if let Some(window) = web_sys::window() {
+            if let Ok(Some(storage)) = window.local_storage() {
+                let _ = storage.set_item("wasmix_boot_target", &self.boot_target);
+            }
         }
     }
 
@@ -50,7 +69,7 @@ impl Bios {
                 
                 if self.ticks == 10 {
                     term.reset();
-                    term.write_str("wasmix bios v0.1.0\n");
+                    term.write_str("wasmix v0.2.0\n");
                     term.write_str("copyright (c) 2026 compusophy inc.\n\n");
                     term.write_str("detecting hardware...\n");
                     term.write_str("cpu: wasm-32 virtual core\n");
@@ -64,10 +83,9 @@ impl Bios {
                      let mem = (progress * 16384.0) as u32;
                      
                      if mem >= 16384 {
-                         // Extra newline for spacing before "Press Any Key"
-                         let msg = format!("\rmemory test: {} kb ok\n\n", 16384);
+                         let target_name = if self.boot_target.contains("terminal") { "terminal" } else { "desktop" };
+                         let msg = format!("\rmemory test: {} kb ok\n\nbooting {}...\n", 16384, target_name);
                          term.write_str(&msg);
-                         // Don't print "press any key" here, let WaitingForInput handle it with countdown
                          self.state = BiosState::WaitingForInput;
                      } else {
                          let msg = format!("\rmemory test: {} kb ok", mem);
@@ -88,8 +106,16 @@ impl Bios {
                     term.write_str("wasmix bios setup\n\n");
                     term.set_fg_color(0xFF_FF_FF_FF); // White
                     term.write_str("select boot device:\n");
-                    term.write_str("1. terminal (default)\n");
-                    term.write_str("2. desktop gui\n\n");
+                    
+                    // Show current default
+                    if self.boot_target.contains("terminal") {
+                        term.write_str("1. terminal (default)\n");
+                        term.write_str("2. desktop gui\n\n");
+                    } else {
+                        term.write_str("1. terminal\n");
+                        term.write_str("2. desktop gui (default)\n\n");
+                    }
+                    
                     term.write_str("press [1] or [2] to select.\n");
                     return false;
                 }
@@ -100,7 +126,7 @@ impl Bios {
                 if self.ticks % 60 == 0 {
                      let remaining = (250i64 - self.ticks as i64) / 60;
                      if remaining > 0 {
-                         let msg = format!("\rpress any key to enter setup... ({}s)   ", remaining);
+                         let msg = format!("\rpress any key for setup ({}s)...   ", remaining);
                          term.write_str(&msg);
                      }
                 }
@@ -113,11 +139,13 @@ impl Bios {
                 if let Some(key) = input_op {
                     if key == "1" {
                         self.boot_target = "/bin/terminal.wasm".to_string();
+                        self.save_boot_target();
                         term.write_str("\nselected: terminal\nbooting...");
                         self.state = BiosState::Booting;
                         self.ticks = 0; // Reset ticks for booting delay
                     } else if key == "2" {
                         self.boot_target = "/bin/desktop.wasm".to_string();
+                        self.save_boot_target();
                         term.write_str("\nselected: desktop\nbooting...");
                         self.state = BiosState::Booting;
                          self.ticks = 0;

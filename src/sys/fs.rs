@@ -61,6 +61,16 @@ impl FileSystem {
         fs.mkdir_internal("local").unwrap();
         fs.mkdir_internal("tmp").unwrap();
         fs.mkdir_internal("bin").unwrap();
+        
+        // Initialize User Directories
+        fs.current_path.push("local".to_string());
+        fs.mkdir_internal("user").unwrap();
+        
+        fs.current_path.push("user".to_string());
+        fs.mkdir_internal("desktop").unwrap();
+        
+        // Return to root
+        fs.current_path.clear();
 
         // Preload hello.wasm
         let hello_wasm = include_bytes!(r"../../apps/hello/target/wasm32-unknown-unknown/release/hello.wasm");
@@ -121,13 +131,13 @@ impl FileSystem {
     // Internal mkdir without saving (used during init)
     fn mkdir_internal(&mut self, path: &str) -> Result<(), String> {
         if self.used_space + 4096 > self.total_space { 
-            return Err("Disk full".to_string());
+            return Err("disk full".to_string());
         }
 
         let path_clone = self.current_path.clone();
         let target_dir = self.resolve_mut_dir(&path_clone)?;
         if target_dir.children.contains_key(path) {
-            return Err("Directory exists".to_string());
+            return Err("directory exists".to_string());
         }
 
         target_dir.children.insert(path.to_string(), Node::new_dir(path));
@@ -159,7 +169,7 @@ impl FileSystem {
         let path_clone = self.current_path.clone();
         let target_dir = self.resolve_mut_dir(&path_clone)?;
         if target_dir.children.contains_key(path) {
-             return Err("File or Directory exists".to_string());
+             return Err("file or directory exists".to_string());
         }
 
         target_dir.children.insert(path.to_string(), Node::new_file(path, Vec::new()));
@@ -188,7 +198,7 @@ impl FileSystem {
              }
              Ok(())
         } else {
-             Err("File or directory not found".to_string())
+             Err("file or directory not found".to_string())
         }
     }
     
@@ -225,10 +235,10 @@ impl FileSystem {
                  self.current_path.push(path.to_string());
                  Ok(())
             } else {
-                Err("Not a directory".to_string())
+                Err("not a directory".to_string())
             }
         } else {
-             Err("Directory not found".to_string())
+             Err("directory not found".to_string())
         }
     }
 
