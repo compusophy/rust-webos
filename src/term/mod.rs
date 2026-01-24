@@ -14,7 +14,9 @@ pub struct Terminal {
     pub cursor_x: usize,
     pub cursor_y: usize,
     pub cursor_visible: bool,
+    #[allow(dead_code)]
     pub default_fg: u32,
+    #[allow(dead_code)]
     pub default_bg: u32,
 }
 
@@ -125,6 +127,7 @@ impl Terminal {
         self.default_fg = color;
     }
 
+    #[allow(dead_code)]
     pub fn set_bg_color(&mut self, color: u32) {
         self.default_bg = color;
     }

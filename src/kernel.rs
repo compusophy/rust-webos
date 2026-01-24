@@ -135,7 +135,7 @@ impl Machine {
                 // We need to pass bus.
                 
                 let mut term = self.term.borrow_mut();
-                if self.bios.step(&mut term, &mut self.bus) {
+                if self.bios.step(&mut term, &mut self.bus, _input_op) {
                     // Handoff to Kernel
                     self.state = MachineState::Kernel;
                     
@@ -145,8 +145,19 @@ impl Machine {
                     term.show_cursor(true); 
                     self.bus.gpu.borrow_mut().clear(0, 0, 0); 
     
-                    // Print Kernel Boot msg
-                    self.shell.borrow_mut().draw_prompt(&mut term);
+                    // NEW BOOT LOGIC:
+                    // Load selected boot target from BIOS
+                    let target = &self.bios.boot_target;
+                    
+                    if let Err(e) = self.wasm.load_from_path(target) {
+                        web_sys::console::log_1(&format!("Failed to boot {}: {}", target, e).into());
+                        // Fallback?
+                        term.write_str(&format!("boot error: {}\n", e));
+                    }
+                    
+                    // If we booted Terminal (or Desktop which uses Term for logs), we're good.
+                    // Desktop might switch to GUI Mode by itself?
+                    // `desktop.wasm` calls `sys_enable_gui_mode` in its init.
                 }
             },
             MachineState::Kernel => {
@@ -204,19 +215,20 @@ impl Machine {
                 }
                 drop(events_guard); // Release borrow
                 
-                // Legacy Shell Input (Text Mode)
+                // Legacy Shell Input (Text Mode) - Can be removed if we fully deprecate internal shell
                 if !*self.gui_mode.borrow() {
                      if let Some(key) = _input_op {
-                         // Need mutable borrows, but scoped to drop before reboot
                          let should_reboot = {
-                             let mut term = self.term.borrow_mut();
-                             let mut fs = self.fs.borrow_mut();
+                             // let mut term = self.term.borrow_mut(); // REMOVED: Shell handles locking
+                             let term = self.term.clone();
+                             // Pass Rc directly (Shell manages locks)
+                             let fs = self.fs.clone(); 
                              // let mut gpu = self.bus.gpu.borrow_mut(); // Removed to avoid RefCell panic
                              let mut shell = self.shell.borrow_mut();
                              
                              let mut events = self.events.borrow_mut();
                              
-                             shell.on_key(&key, &mut term, &mut fs, &self.wasm, &mut events, self.tick_count, self.real_fps)
+                             shell.on_key(&key, &term, &fs, &self.wasm, &mut events, self.tick_count, self.real_fps)
                          };
                          
                          if should_reboot {
@@ -226,9 +238,7 @@ impl Machine {
                      }
                 }
 
-                if !*self.gui_mode.borrow() {
-                     self.bus.gpu.borrow_mut().clear(0, 0, 0); 
-                }
+                // REMOVED CLEAR: Terminal App manages screen.
             },
         }
     }

@@ -19,9 +19,10 @@ pub extern "C" fn init() {
         let w = sys_gpu_width();
         let h = sys_gpu_height();
         let mut manager = wm::WindowManager::new(w, h);
+        manager.init();
         
-        WM = Some(manager);
-        if let Some(wm) = WM.as_ref() {
+        *std::ptr::addr_of_mut!(WM) = Some(manager);
+        if let Some(wm) = (*std::ptr::addr_of_mut!(WM)).as_ref() {
             wm.draw();
         }
     }
@@ -30,7 +31,7 @@ pub extern "C" fn init() {
 #[no_mangle]
 pub extern "C" fn step() {
     unsafe {
-        if let Some(wm) = WM.as_mut() {
+        if let Some(wm) = (*std::ptr::addr_of_mut!(WM)).as_mut() {
             // Poll Events
             let mut event_bytes = [0u8; 16];
             loop {

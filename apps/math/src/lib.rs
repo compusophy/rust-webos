@@ -14,16 +14,16 @@ pub extern "C" fn _start() {
     // but for simplicity in this demo, we'll construct a simple string buffer or import a mini formatter.
     // Or just simple hardcoded logic string for now to prove it works, or do manual int to string.
     
-    let msg = "math check: 10 + 32 = 42"; // Hardcoded for SAFETY/SPEED if no formatter
+    let _msg = "math check: 10 + 32 = 42"; // Hardcoded for SAFETY/SPEED if no allocationster
     // Let's actually compute it to prove it's real code running?
     // Without `alloc` or `std`, string formatting is annoying.
     // Let's just print static strings based on the result to PROVE calculation happened.
     
     if sum == 42 {
-        let success = "math success: 10 + 32 is indeed 42";
+        let success = "addition success: 10 + 32 = 42";
         unsafe { sys_print(success.as_ptr(), success.len()); }
     } else {
-        let fail = "math failed: cpu error";
+        let fail = "addition failed: cpu error";
         unsafe { sys_print(fail.as_ptr(), fail.len()); }
     }
     

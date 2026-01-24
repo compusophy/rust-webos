@@ -2,6 +2,7 @@ use crate::ui;
 use crate::window::Window;
 
 extern "C" {
+    #[allow(dead_code)]
     fn sys_reset();
     fn sys_reboot();
 }
@@ -28,6 +29,13 @@ impl WindowManager {
             mouse_x: width / 2,
             mouse_y: height / 2,
             next_id: 1,
+        }
+    }
+    
+    pub fn init(&mut self) {
+        // Force initial clear to remove any artifacts from previous process
+        unsafe {
+            ui::sys_draw_rect(0, 0, self.width, self.height, ui::COLOR_DESKTOP);
         }
     }
 
@@ -216,7 +224,7 @@ impl WindowManager {
                     let start_y = content_y + 20;
                     
                      if x >= content_x && x < content_x + win.w - 8 && y >= start_y {
-                         let row = (y - start_y) / 16;
+                         let _row = (y - start_y) / 16;
                          // Store this request. We can't kill immediately while holding mutable borrow of TM window.
                          // But wait, `self.windows` is what we need to modify. 
                          // Implementation constraint: 

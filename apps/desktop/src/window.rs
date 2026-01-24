@@ -42,8 +42,7 @@ impl Window {
         if content_type == "file_manager" {
             win.refresh_files();
         } else if content_type == "terminal" {
-            win.term_lines.push("Welcome to WebOS Terminal".to_string());
-            win.term_lines.push("Type 'help' for commands.".to_string());
+            // No welcome message to match Kernel Shell
         }
         
         win
@@ -56,7 +55,7 @@ impl Window {
         match code {
             10 => { // Enter
                 let cmd = self.term_input.trim().to_string();
-                self.term_lines.push(format!("user@webos:~$ {}", self.term_input));
+                self.term_lines.push(format!("user@wasmix:~$ {}", self.term_input));
                 self.term_input.clear();
                 
                 // Parse Command
@@ -188,7 +187,7 @@ impl Window {
                      }
                      
                      // Draw Input Line
-                     let prompt = format!("user@webos:~$ {}_", self.term_input);
+                     let prompt = format!("user@wasmix:~$ {}_", self.term_input);
                      ui::draw_text(content_x + 5, dy, &prompt, ui::COLOR_WHITE);
                 },
                 "task_manager" => {

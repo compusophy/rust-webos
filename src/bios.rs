@@ -19,6 +19,8 @@ use crate::term::Terminal;
 pub enum BiosState {
     PowerOn,
     MemoryTest,
+    WaitingForInput,
+    Setup,
     Booting,
     Done,
 }
@@ -26,6 +28,7 @@ pub enum BiosState {
 pub struct Bios {
     state: BiosState,
     ticks: u64,
+    pub boot_target: String,
 }
 
 impl Bios {
@@ -33,16 +36,17 @@ impl Bios {
         Self {
             state: BiosState::PowerOn,
             ticks: 0,
+            boot_target: "/bin/terminal.wasm".to_string(), // Default
         }
     }
 
     // Returns true when BIOS is done and Kernel should start
-    pub fn step(&mut self, term: &mut Terminal, bus: &mut super::hw::bus::Bus) -> bool {
+    pub fn step(&mut self, term: &mut Terminal, bus: &mut super::hw::bus::Bus, input_op: Option<String>) -> bool {
         self.ticks += 1;
 
         match self.state {
             BiosState::PowerOn => {
-                bus.gpu.borrow_mut().clear(0, 0, 0); // Black BIOS SCreen
+                bus.gpu.borrow_mut().clear(0, 0, 0); 
                 
                 if self.ticks == 10 {
                     term.reset();
@@ -56,23 +60,73 @@ impl Bios {
             },
             BiosState::MemoryTest => {
                  if self.ticks % 10 == 0 {
-                     // Check Ram (Simulate up to 16384 KB)
-                     let progress = (self.ticks - 10) as f64 / 100.0; // 100 ticks for mem test
+                     let progress = (self.ticks - 10) as f64 / 100.0;
                      let mem = (progress * 16384.0) as u32;
                      
                      if mem >= 16384 {
-                         let msg = format!("\rmemory test: {} kb ok\n", 16384);
+                         // Extra newline for spacing before "Press Any Key"
+                         let msg = format!("\rmemory test: {} kb ok\n\n", 16384);
                          term.write_str(&msg);
-                         self.state = BiosState::Booting;
+                         // Don't print "press any key" here, let WaitingForInput handle it with countdown
+                         self.state = BiosState::WaitingForInput;
                      } else {
                          let msg = format!("\rmemory test: {} kb ok", mem);
                          term.write_str(&msg);
                      }
                 }
             },
+            BiosState::WaitingForInput => {
+                // If any key pressed, go to Setup
+                if input_op.is_some() {
+                    term.write_str("entering setup...\n");
+                    self.state = BiosState::Setup;
+                    // Reset ticks to delay setup redraw or just clear?
+                    // Let's clear screen for setup menu
+                    bus.gpu.borrow_mut().clear(0, 0, 0x80); // Dark Blue background for BIOS Menu
+                    term.reset();
+                    term.set_fg_color(0xFF_FF_00_FF); // Yellow
+                    term.write_str("wasmix bios setup\n\n");
+                    term.set_fg_color(0xFF_FF_FF_FF); // White
+                    term.write_str("select boot device:\n");
+                    term.write_str("1. terminal (default)\n");
+                    term.write_str("2. desktop gui\n\n");
+                    term.write_str("press [1] or [2] to select.\n");
+                    return false;
+                }
+
+                // Countdown
+                // WaitingForInput runs from roughly tick 110 to 250 (140 ticks).
+                // Let's say timeout is tick 250.
+                if self.ticks % 60 == 0 {
+                     let remaining = (250i64 - self.ticks as i64) / 60;
+                     if remaining > 0 {
+                         let msg = format!("\rpress any key to enter setup... ({}s)   ", remaining);
+                         term.write_str(&msg);
+                     }
+                }
+
+                if self.ticks > 250 {
+                    self.state = BiosState::Booting;
+                }
+            },
+            BiosState::Setup => {
+                if let Some(key) = input_op {
+                    if key == "1" {
+                        self.boot_target = "/bin/terminal.wasm".to_string();
+                        term.write_str("\nselected: terminal\nbooting...");
+                        self.state = BiosState::Booting;
+                        self.ticks = 0; // Reset ticks for booting delay
+                    } else if key == "2" {
+                        self.boot_target = "/bin/desktop.wasm".to_string();
+                        term.write_str("\nselected: desktop\nbooting...");
+                        self.state = BiosState::Booting;
+                         self.ticks = 0;
+                    }
+                }
+            },
             BiosState::Booting => {
-                 // Skip text, just wait a brief moment then done
-                 if self.ticks > 120 {
+                 // Brief delay to read "Booting..." or "Selected..."
+                 if self.ticks > 60 {
                      self.state = BiosState::Done;
                  }
             },

@@ -49,7 +49,9 @@ impl Shell {
         }
     }
 
-    pub fn draw_prompt(&self, term: &mut crate::term::Terminal) {
+    pub fn draw_prompt(&self, term: &std::rc::Rc<std::cell::RefCell<crate::term::Terminal>>) {
+        let mut term = term.borrow_mut();
+        
         // Colors
         let orange = 0xFF_A5_00_FF;
         let green = 0x00_FF_00_FF;
@@ -77,31 +79,35 @@ impl Shell {
         term.set_fg_color(white);
     }
 
-    pub fn update_prompt(&mut self, fs: &crate::sys::fs::FileSystem) {
-        let path = if fs.current_path.is_empty() {
-            "~".to_string()
-        } else {
-             // Join path
-             let mut p = String::from("/");
-             for part in &fs.current_path {
-                 p.push_str(part);
-                 p.push('/');
-             }
-             // Remove trailing slash if len > 1
-             if p.len() > 1 { p.pop(); }
-             p
+    pub fn update_prompt(&mut self, fs: &std::rc::Rc<std::cell::RefCell<crate::sys::fs::FileSystem>>) {
+        let path = {
+            let fs_guard = fs.borrow();
+            if fs_guard.current_path.is_empty() {
+                "~".to_string()
+            } else {
+                 // Join path
+                 let mut p = String::from("/");
+                 for part in &fs_guard.current_path {
+                     p.push_str(part);
+                     p.push('/');
+                 }
+                 // Remove trailing slash if len > 1
+                 if p.len() > 1 { p.pop(); }
+                 p
+            }
         };
         self.current_path = path;
     }
 
-    pub fn on_key(&mut self, key: &str, term: &mut crate::term::Terminal, fs: &mut crate::sys::fs::FileSystem, wasm: &crate::sys::wasm::WasmRuntime, events: &mut std::collections::VecDeque<crate::kernel::SystemEvent>, ticks: u64, hz: f64) -> bool {
+    pub fn on_key(&mut self, key: &str, term: &std::rc::Rc<std::cell::RefCell<crate::term::Terminal>>, fs: &std::rc::Rc<std::cell::RefCell<crate::sys::fs::FileSystem>>, wasm: &crate::sys::wasm::WasmRuntime, events: &mut std::collections::VecDeque<crate::kernel::SystemEvent>, ticks: u64, hz: f64) -> bool {
+        // ... (lines 98-135 unchanged logical structure, but prompt update needs fs)
         // Handle confirmation dialog
         if self.waiting_for_reset {
             if key == "Enter" {
-                term.write_char('\n');
+                term.borrow_mut().write_char('\n');
                 let input = self.input_buffer.trim();
                 if input == "y" || input == "Y" {
-                    term.write_str("resetting to factory defaults...\n");
+                    term.borrow_mut().write_str("resetting to factory defaults...\n");
                     
                     // Clear LocalStorage
                     if let Some(window) = web_sys::window() {
@@ -114,7 +120,7 @@ impl Shell {
                     self.waiting_for_reset = false;
                     return true; // Trigger REBOOT
                 } else {
-                    term.write_str("reset cancelled.\n");
+                    term.borrow_mut().write_str("reset cancelled.\n");
                     self.input_buffer.clear();
                     self.waiting_for_reset = false;
                     self.draw_prompt(term);
@@ -123,24 +129,24 @@ impl Shell {
             } else if key == "Backspace" {
                  if !self.input_buffer.is_empty() {
                     self.input_buffer.pop();
-                    term.write_char('\x08'); 
+                    term.borrow_mut().write_char('\x08'); 
                 }
                 return false;
             } else if key.len() == 1 {
                 self.input_buffer.push_str(key);
-                term.write_str(key);
+                term.borrow_mut().write_str(key);
                 return false;
             }
             return false;
         }
 
         if key == "Enter" {
-            term.write_char('\n');
+            term.borrow_mut().write_char('\n');
             if !self.input_buffer.trim().is_empty() {
                 self.history.push(self.input_buffer.clone());
                 self.history_index = None;
             }
-            // MODIFIED: Pass Some(wasm)
+            
             let reboot = self.execute_command(term, fs, Some(wasm), events, ticks, hz);
             self.input_buffer.clear();
             self.draw_prompt(term);
@@ -148,7 +154,7 @@ impl Shell {
         } else if key == "Backspace" {
             if !self.input_buffer.is_empty() {
                 self.input_buffer.pop();
-                term.write_char('\x08'); 
+                term.borrow_mut().write_char('\x08'); 
             }
         } else if key == "ArrowUp" {
             if !self.history.is_empty() {
@@ -160,17 +166,17 @@ impl Shell {
 
                 // Clear current line
                 for _ in 0..self.input_buffer.len() {
-                    term.write_char('\x08');
+                    term.borrow_mut().write_char('\x08');
                 }
                 
                 self.input_buffer = self.history[new_index].clone();
-                term.write_str(&self.input_buffer);
+                term.borrow_mut().write_str(&self.input_buffer);
             }
         } else if key == "ArrowDown" {
             if let Some(i) = self.history_index {
                 // Clear current line
                 for _ in 0..self.input_buffer.len() {
-                    term.write_char('\x08');
+                    term.borrow_mut().write_char('\x08');
                 }
 
                 if i < self.history.len() - 1 {
@@ -181,41 +187,39 @@ impl Shell {
                     self.history_index = None;
                     self.input_buffer.clear();
                 }
-                term.write_str(&self.input_buffer);
+                term.borrow_mut().write_str(&self.input_buffer);
             }
         } else if key.len() == 1 {
             self.input_buffer.push_str(key);
-            term.write_str(key);
+            term.borrow_mut().write_str(key);
         }
         false
     }
     
-    // UPDATED: execute_command (separating IO)
-    pub fn execute_command(&mut self, term: &mut crate::term::Terminal, fs: &mut crate::sys::fs::FileSystem, wasm: Option<&crate::sys::wasm::WasmRuntime>, events: &mut std::collections::VecDeque<crate::kernel::SystemEvent>, ticks: u64, hz: f64) -> bool {
-        let full_input = self.input_buffer.trim().to_string(); // Clone to break borrow
+    pub fn execute_command(&mut self, term: &std::rc::Rc<std::cell::RefCell<crate::term::Terminal>>, fs: &std::rc::Rc<std::cell::RefCell<crate::sys::fs::FileSystem>>, wasm: Option<&crate::sys::wasm::WasmRuntime>, events: &mut std::collections::VecDeque<crate::kernel::SystemEvent>, ticks: u64, hz: f64) -> bool {
+        let full_input = self.input_buffer.trim().to_string(); 
         if full_input.is_empty() {
              return false;
         }
 
-        // Split by "&&"
         let commands: Vec<&str> = full_input.split("&&").collect();
         
         for cmd_str in commands {
             let (res, output) = self.run_one_command(cmd_str.trim(), fs, wasm, events, ticks, hz);
             
-            term.write_str(&output);
+            term.borrow_mut().write_str(&output);
 
             match res {
                 CmdResult::Success => continue,
-                CmdResult::Error => break, // Stop chain on error
+                CmdResult::Error => break, 
                 CmdResult::Reboot => return true,
-                CmdResult::Clear => term.reset(),
+                CmdResult::Clear => term.borrow_mut().reset(),
             }
         }
         false
     }
     
-    pub fn execute_string(&mut self, full_input: &str, fs: &mut crate::sys::fs::FileSystem, wasm: Option<&crate::sys::wasm::WasmRuntime>, events: &mut std::collections::VecDeque<crate::kernel::SystemEvent>, ticks: u64, hz: f64) -> String {
+    pub fn execute_string(&mut self, full_input: &str, fs: &std::rc::Rc<std::cell::RefCell<crate::sys::fs::FileSystem>>, wasm: Option<&crate::sys::wasm::WasmRuntime>, events: &mut std::collections::VecDeque<crate::kernel::SystemEvent>, ticks: u64, hz: f64) -> String {
         let mut full_output = String::new();
         if full_input.trim().is_empty() {
             return full_output;
@@ -224,6 +228,10 @@ impl Shell {
         let commands: Vec<&str> = full_input.split("&&").collect();
         
         for cmd_str in commands {
+            // Note: pass dummy term? Or does execute_string NOT print to term?
+            // Actually, run_one_command returns output. We aggregate it.
+            // But we can't pass `term` because we don't have it here. This function returns String.
+            // That's fine.
             let (res, output) = self.run_one_command(cmd_str.trim(), fs, wasm, events, ticks, hz);
             full_output.push_str(&output);
 
@@ -237,7 +245,7 @@ impl Shell {
         full_output
     }
     
-    fn run_one_command(&mut self, cmd_str: &str, fs: &mut crate::sys::fs::FileSystem, wasm: Option<&crate::sys::wasm::WasmRuntime>, _events: &mut std::collections::VecDeque<crate::kernel::SystemEvent>, ticks: u64, hz: f64) -> (CmdResult, String) {
+    fn run_one_command(&mut self, cmd_str: &str, fs: &std::rc::Rc<std::cell::RefCell<crate::sys::fs::FileSystem>>, wasm: Option<&crate::sys::wasm::WasmRuntime>, _events: &mut std::collections::VecDeque<crate::kernel::SystemEvent>, ticks: u64, hz: f64) -> (CmdResult, String) {
         let mut out = String::new();
         if cmd_str.is_empty() {
              return (CmdResult::Success, out);
@@ -259,7 +267,7 @@ impl Shell {
                 (CmdResult::Clear, out)
             },
             "ls" => {
-                let items = fs.list_dir();
+                let items = fs.borrow().list_dir();
                 for item in items {
                     out.push_str(&item);
                     out.push_str("  ");
@@ -272,7 +280,8 @@ impl Shell {
                     out.push_str("usage: mkdir <name>\n");
                     (CmdResult::Error, out)
                 } else {
-                    match fs.mkdir(parts[1]) {
+                    let res = fs.borrow_mut().mkdir(parts[1]);
+                    match res {
                         Ok(_) => (CmdResult::Success, out),
                         Err(e) => {
                             out.push_str("error: ");
@@ -288,7 +297,8 @@ impl Shell {
                     out.push_str("usage: touch <name>\n");
                     (CmdResult::Error, out)
                 } else {
-                    match fs.create_file(parts[1]) {
+                    let res = fs.borrow_mut().create_file(parts[1]);
+                    match res {
                         Ok(_) => (CmdResult::Success, out),
                         Err(e) => {
                             out.push_str("error: ");
@@ -304,7 +314,8 @@ impl Shell {
                     out.push_str("usage: rm <name>\n");
                     (CmdResult::Error, out)
                 } else {
-                    match fs.remove_entry(parts[1]) {
+                    let res = fs.borrow_mut().remove_entry(parts[1]);
+                    match res {
                         Ok(_) => (CmdResult::Success, out),
                         Err(e) => {
                              out.push_str("error: ");
@@ -317,17 +328,18 @@ impl Shell {
             },
             "cd" => {
                 if parts.len() < 2 {
-                     match fs.cd("/") { _ => {} };
+                     let _ = fs.borrow_mut().cd("/");
                      self.update_prompt(fs); 
                      (CmdResult::Success, out)
                 } else {
-                     let target = if let Some(matched) = fs.match_entry(parts[1]) {
+                     let target = if let Some(matched) = fs.borrow().match_entry(parts[1]) {
                          matched
                      } else {
                          parts[1].to_string()
                      };
                      
-                     match fs.cd(&target) {
+                     let res = fs.borrow_mut().cd(&target);
+                     match res {
                         Ok(_) => {
                             self.update_prompt(fs); 
                             (CmdResult::Success, out)
@@ -342,8 +354,9 @@ impl Shell {
                 }
             },
              "df" => {
-                let total_kb = fs.total_space / 1024;
-                let used_kb = fs.used_space / 1024;
+                let fs_guard = fs.borrow();
+                let total_kb = fs_guard.total_space / 1024;
+                let used_kb = fs_guard.used_space / 1024;
                 let msg = format!("disk usage:\n  used: {} kb\n  total: {} kb\n  free: {} kb\n", used_kb, total_kb, total_kb - used_kb);
                 out.push_str(&msg);
                 (CmdResult::Success, out)
@@ -393,54 +406,54 @@ impl Shell {
                 } else {
                     let wasm_rt = wasm.unwrap();
                     let path = parts[1];
-                    let file_node = fs.resolve_dir(&fs.current_path) 
-                        .and_then(|d| d.children.get(path))
-                        .or_else(|| {
-                             if path.starts_with("/bin/") {
-                                 fs.root.children.get("bin").and_then(|b| b.children.get(&path[5..]))
-                             } else {
-                                None
-                             }
-                        });
-
-
-                    if let Some(node) = file_node {
-                        if let crate::sys::fs::NodeType::File = node.node_type {
-                            out.push_str(&format!("executing {}...\n", path));
-                            match wasm_rt.load(&node.content) {
-                                Ok(captured_output) => {
-                                    out.push_str(&captured_output);
-                                    (CmdResult::Success, out)
-                                },
-                                Err(e) => {
-                                    out.push_str(&format!("execution error: {}\n", e));
-                                    (CmdResult::Error, out)
+                    
+                    // Critical: DO NOT hold FS lock here. wasm_rt.load_from_path will take it.
+                    let file_node_content = {
+                        let fs_guard = fs.borrow();
+                        fs_guard.resolve_dir(&fs_guard.current_path) 
+                            .and_then(|d| d.children.get(path))
+                            .or_else(|| {
+                                 if path.starts_with("/bin/") {
+                                     fs_guard.root.children.get("bin").and_then(|b| b.children.get(&path[5..]))
+                                 } else {
+                                    None
+                                 }
+                            }).and_then(|node| {
+                                if let crate::sys::fs::NodeType::File = node.node_type {
+                                    Some(node.content.clone()) // Clone content to ensure we drop fs borrow
+                                } else {
+                                    None
                                 }
+                            })
+                    };
+
+                    if let Some(content) = file_node_content {
+                        out.push_str(&format!("loading wasm ({} bytes)...\n", content.len()));
+                        match wasm_rt.load(&content) {
+                            Ok(captured_output) => {
+                                out.push_str(&captured_output);
+                                (CmdResult::Success, out)
+                            },
+                            Err(e) => {
+                                out.push_str(&format!("exec crash: {}\n", e));
+                                (CmdResult::Error, out)
                             }
-                        } else {
-                             out.push_str("not a file\n");
-                             (CmdResult::Error, out)
                         }
                     } else {
-                         let dir = fs.resolve_dir(&fs.current_path).unwrap_or(&fs.root);
-                         if let Some(node) = dir.children.get(path) {
-                               if let crate::sys::fs::NodeType::File = node.node_type {
-                                    match wasm_rt.load(&node.content) {
-                                        Ok(captured_output) => {
-                                            out.push_str(&captured_output);
-                                            (CmdResult::Success, out)
-                                        },
-                                        Err(e) => {
-                                             out.push_str(&format!("error: {}\n", e));
-                                             (CmdResult::Error, out)
-                                        }
-                                    }
-                               } else {
-                                   out.push_str("not a file\n");
-                                   (CmdResult::Error, out)
-                               }
+                         // Check if directory?
+                         let is_dir = {
+                             let fs_guard = fs.borrow();
+                             // Debug path resolution
+                             // web_sys::console::log_1(&format!("exec resolve failed for: {}", path).into());
+                             let dir = fs_guard.resolve_dir(&fs_guard.current_path).unwrap_or(&fs_guard.root);
+                             dir.children.get(path).is_some()
+                         };
+                         
+                         if is_dir {
+                             out.push_str(&format!("error: '{}' is a directory\n", path));
+                             (CmdResult::Error, out)
                          } else {
-                             out.push_str("file not found\n");
+                             out.push_str(&format!("error: file '{}' not found\n", path));
                              (CmdResult::Error, out)
                          }
                     }

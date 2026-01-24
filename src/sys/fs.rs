@@ -79,6 +79,12 @@ impl FileSystem {
          if let Some(bin) = fs.root.children.get_mut("bin") {
              bin.children.insert("desktop.wasm".to_string(), Node::new_file("desktop.wasm", desktop_wasm.to_vec()));
         }
+
+        // Preload terminal.wasm
+        let terminal_wasm = include_bytes!(r"../../apps/terminal/target/wasm32-unknown-unknown/release/terminal.wasm");
+         if let Some(bin) = fs.root.children.get_mut("bin") {
+             bin.children.insert("terminal.wasm".to_string(), Node::new_file("terminal.wasm", terminal_wasm.to_vec()));
+        }
         
         // Load persistent storage for "local"
         fs.load_local_disk();
